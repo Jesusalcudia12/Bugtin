@@ -76,7 +76,7 @@ def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
             "🤖 **Bugtin Bot v9.5 - Ultimate Audit**\n\n"
-            "📡 `/subs` - Recon de Subdominios\n"
+            "📡 `/subs` - Recon de Subdominios (Muestra IP)\n"
             "🕸️ `/crawl` - Mapeo de Endpoints\n"
             "🔍 `/fuzz` - Fuzzing Avanzado\n"
             "🔓 `/auditar` - Escaneo con IA\n"
@@ -89,27 +89,42 @@ def send_welcome(message):
         markup.add("⚡ Ataque Hydra")
         bot.send_message(message.chat.id, help_text, reply_markup=markup, parse_mode="Markdown")
 
-# --- COMANDO: SUBDOMINIOS ---
+# --- COMANDO: SUBDOMINIOS CON RESOLUCIÓN DE IP ---
 @bot.message_handler(commands=['subs'])
 def start_subs(message):
-    msg = bot.send_message(message.chat.id, "📡 **Introduce el dominio (google.com):**", parse_mode="Markdown")
+    msg = bot.send_message(message.chat.id, "📡 **Introduce el dominio para extraer Subdominios + IPs:**", parse_mode="Markdown")
     bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_subdomains_step, m))
 
 def process_subdomains_step(message):
     target = message.text.strip().lower()
+    target = target.replace("https://", "").replace("http://", "").split("/")[0]
     chat_id = message.chat.id
-    output = f"subs_{target}.txt"
-    bot.send_message(chat_id, f"🚀 Subfinder trabajando en `{target}`...")
+    output_raw = f"raw_{target}.txt"
+    output_final = f"subs_ips_{target}.txt"
+    
+    bot.send_message(chat_id, f"🚀 Escaneando `{target}` y resolviendo IPs...", parse_mode="Markdown")
+    
     try:
-        subprocess.run(f"subfinder -d {target} -silent -o {output}", shell=True)
-        if os.path.exists(output) and os.path.getsize(output) > 0:
-            with open(output, "rb") as f:
-                bot.send_document(chat_id, f, caption=f"🏁 Subdominios de {target}")
-            os.remove(output)
+        # 1. Obtenemos subdominios de forma silenciosa
+        subprocess.run(f"subfinder -d {target} -silent -o {output_raw}", shell=True, timeout=120)
+        
+        if os.path.exists(output_raw) and os.path.getsize(output_raw) > 0:
+            # 2. Resolución de IP mediante un bucle de shell rápido (ping simple para obtener IP)
+            # Esto crea un archivo con formato: subdominio.com [1.2.3.4]
+            script_resolver = f"while read sub; do ip=$(getent hosts $sub | awk '{{print $1}}'); if [ ! -z \"$ip\" ]; then echo \"$sub [$ip]\" >> {output_final}; else echo \"$sub [No IP]\" >> {output_final}; fi; done < {output_raw}"
+            subprocess.run(script_resolver, shell=True)
+
+            if os.path.exists(output_final):
+                with open(output_final, "rb") as f:
+                    bot.send_document(chat_id, f, caption=f"🏁 Lista de Subdominios e IPs para: `{target}`", parse_mode="Markdown")
+                os.remove(output_final)
+            
+            os.remove(output_raw)
         else:
-            bot.send_message(chat_id, "❌ No se hallaron subdominios.")
+            bot.send_message(chat_id, "❌ No se encontraron subdominios públicos.")
+            
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
+        bot.send_message(chat_id, f"⚠️ Error en reconocimiento: {str(e)}")
 
 # --- COMANDO: CRAWLING ---
 @bot.message_handler(commands=['crawl'])
@@ -122,7 +137,7 @@ def process_crawl_step(message):
     output = f"crawl_{int(time.time())}.txt"
     bot.send_message(message.chat.id, f"🕷️ Katana mapeando `{url}`...")
     try:
-        subprocess.run(f"katana -u {url} -d 3 -jc -o {output} -silent", shell=True)
+        subprocess.run(f"katana -u {url} -d 3 -jc -o {output} -silent", shell=True, timeout=300)
         if os.path.exists(output) and os.path.getsize(output) > 0:
             with open(output, "rb") as f:
                 bot.send_document(message.chat.id, f, caption=f"🗺️ Mapa: {url}")
@@ -187,6 +202,31 @@ def process_audit_step(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"⚠️ Error: {str(e)}")
 
+# --- COMANDO: FUERZA BRUTA (HYDRA) ---
+@bot.message_handler(commands=['fuerza'])
+def start_fuerza(message):
+    ejemplo = "⚡ **Ataque Hydra**\nFormato: `IP Servicio Usuario`"
+    msg = bot.send_message(message.chat.id, ejemplo, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_fuerza_step, m))
+
+def process_fuerza_step(message):
+    try:
+        cmd = obtener_comando_hydra()
+        data = message.text.split()
+        if not cmd or len(data) < 3:
+            bot.send_message(message.chat.id, "❌ Error en parámetros.")
+            return
+        ip, svc, user = data[0], data[1], data[2]
+        subprocess.run(f"{cmd} -l {user} -P passwords.txt -t 4 -f {ip} {svc} -o res_hydra.txt", shell=True)
+        if os.path.exists("res_hydra.txt"):
+            with open("res_hydra.txt", "r") as f:
+                bot.send_message(message.chat.id, f"🎯 **ACCESO:**\n`{f.read()}`", parse_mode="Markdown")
+            os.remove("res_hydra.txt")
+        else:
+            bot.send_message(message.chat.id, "❌ No se encontró contraseña.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"⚠️ Error: {str(e)}")
+
 # --- BOTONES ---
 @bot.message_handler(func=lambda m: True)
 def router(m):
@@ -196,5 +236,5 @@ def router(m):
     elif m.text == "🔓 Auditoría IA": start_audit(m)
     elif m.text == "⚡ Ataque Hydra": start_fuerza(m)
 
-print("🚀 Bugtin Bot v9.5 ONLINE - Multi-hilo Activado")
+print("🚀 Bugtin Bot v9.5 ONLINE - Resolución IP Activada")
 bot.polling(none_stop=True)
