@@ -44,7 +44,7 @@ def analizar_y_explicar(archivo_reporte):
         impacto += "⚠️ **Nivel: MEDIO**\nSe encontraron rutas expuestas, respaldos o logs."
         instrucciones += "1. Revisa los logs en busca de nombres de usuario.\n2. Intenta un ataque de fuerza bruta con `/fuerza`."
     else:
-        impacto += "ℹ️ **Nivel: INFORMACIÓN**\nSolo se detectó información técnica."
+        impacto += "ℹ {Nivel: INFORMACIÓN}\nSolo se detectó información técnica."
         instrucciones += "1. Úsala para perfilar el servidor objetivo."
     
     return impacto, instrucciones
@@ -71,12 +71,12 @@ def descargar_filtracion(url, chat_id):
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v8.9 - Expert Mode**\n\n"
+            "🤖 **Bugtin Bot v8.10 - Expert Mode**\n\n"
             "📡 `/subs` - Recon de subdominios.\n"
             "🔓 `/archivos` - Escaneo y exfiltración automática.\n"
-            "🔍 `/fuzz` - Buscar paneles con logins.txt.\n"
+            "🔍 `/fuzz` - Buscar paneles con logins.txt (Fix).\n"
             "⚡ `/fuerza` - Ataque Hydra con ejemplos.\n\n"
-            "🚀 *Estado: Integración con logins.txt activa.*"
+            "🚀 *Estado: Comando Gobuster corregido para Termux.*"
         )
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("📡 Solo Subdominios", "🔓 Buscar Archivos Expuestos")
@@ -113,7 +113,7 @@ def process_subdomains_step(message):
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: FUZZING DE LOGINS (Uso de logins.txt) ---
+# --- LÓGICA: FUZZING DE LOGINS (CORREGIDO) ---
 @bot.message_handler(commands=['fuzz'])
 def start_fuzzing(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
@@ -132,8 +132,9 @@ def process_fuzzing_step(message):
 
     bot.send_message(chat_id, f"🔍 Escaneando rutas en `{url}`...")
     try:
-        # Ejecuta gobuster dir para encontrar códigos 200, 204, 301, 302, 307
-        subprocess.run(f"gobuster dir -u {url} -w {wordlist} --quiet -z --output {output}", shell=True)
+        # CORRECCIÓN VERSIÓN 8.10: Se eliminó el flag '-z' que causaba error en Gobuster/Termux.
+        # Se añaden flags: -e (URL completa), -n (No imprimir banner), --quiet (Solo resultados).
+        subprocess.run(f"gobuster dir -u {url} -w {wordlist} --quiet -n -e --output {output}", shell=True)
         
         if os.path.exists(output) and os.path.getsize(output) > 0:
             with open(output, "r") as f:
@@ -246,5 +247,5 @@ def btn_fuzz(m): start_fuzzing(m)
 @bot.message_handler(func=lambda m: m.text == "⚡ Ataque de Fuerza Bruta")
 def btn_fuerza(m): start_fuerza(m)
 
-print("🚀 Bugtin Bot v8.9 Online. Integración de logins.txt lista.")
+print("🚀 Bugtin Bot v8.10 Online. Gobuster corregido.")
 bot.polling()
