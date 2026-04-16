@@ -23,10 +23,10 @@ def ejecutar_en_hilo(func, message):
 
 def enviar_archivo_seguro(chat_id, ruta, caption):
     """Espera al disco y verifica que el archivo no esté vacío antes de enviar"""
-    # Pausa de seguridad para que el sistema de archivos de Termux termine de escribir
-    time.sleep(2)
+    # Pausa de seguridad aumentada a 3 segundos para que el sistema de archivos de Termux termine de escribir
+    time.sleep(3)
     
-    if os.path.exists(ruta) and os.path.getsize(ruta) > 0:
+    if os.path.exists(ruta) and os.path.getsize(ruta) > 10: # Filtramos archivos vacíos o insignificantes
         try:
             with open(ruta, "rb") as f:
                 bot.send_document(chat_id, f, caption=caption, parse_mode="Markdown")
@@ -35,9 +35,9 @@ def enviar_archivo_seguro(chat_id, ruta, caption):
             bot.send_message(chat_id, f"❌ Error al enviar documento: {str(e)}")
     else:
         if os.path.exists(ruta): os.remove(ruta)
-        bot.send_message(chat_id, "⚠️ El escaneo terminó sin resultados o el archivo está vacío.")
+        bot.send_message(chat_id, "⚠️ El escaneo terminó sin resultados relevantes o el sitio bloqueó la conexión.")
 
-# --- RECONOCIMIENTO (MANTENIENDO TU LÓGICA ORIGINAL) ---
+# --- RECONOCIMIENTO (LÓGICA ORIGINAL) ---
 @bot.message_handler(commands=['subs'])
 def start_subs(message):
     msg = bot.send_message(message.chat.id, "📡 Introduce el dominio (ej: bbva.com):", parse_mode="Markdown")
@@ -48,14 +48,12 @@ def process_subs_fix(message):
     target = target.replace("https://", "").replace("http://", "").split("/")[0]
     chat_id = message.chat.id
     
-    # Usamos BASE_DIR para definir rutas absolutas
     output_raw = os.path.join(BASE_DIR, f"raw_{target}.txt")
     output_final = os.path.join(BASE_DIR, f"subs_result_{target}.txt")
     
     bot.send_message(chat_id, f"🔍 Escaneando {target}... (Esto puede tardar 1-2 min)")
     
     try:
-        # Lógica original: Subfinder con fallback
         subprocess.run(f"subfinder -d {target} -silent -o {output_raw}", shell=True, timeout=120)
         
         if not os.path.exists(output_raw) or os.path.getsize(output_raw) == 0:
@@ -83,7 +81,7 @@ def process_subs_fix(message):
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error en el motor: {str(e)}")
 
-# --- NUEVO COMANDO: CRAWL (KATANA) ---
+# --- CRAWL (KATANA) ---
 @bot.message_handler(commands=['crawl'])
 def start_crawl(message):
     msg = bot.send_message(message.chat.id, "🕸️ **Introduce la URL para Crawling:**")
@@ -97,7 +95,7 @@ def process_crawl(message):
     subprocess.run(f"katana -u {target} -silent -o {path}", shell=True, timeout=300)
     enviar_archivo_seguro(message.chat.id, path, f"🕸️ Crawl finalizado: `{target}`")
 
-# --- NUEVO COMANDO: FUZZING (FFUF) ---
+# --- FUZZING (FFUF) CON FILTRO ---
 @bot.message_handler(commands=['fuzz'])
 def start_fuzz(message):
     msg = bot.send_message(message.chat.id, "🔍 **URL con FUZZ (ej: http://site.com/FUZZ):**")
@@ -110,11 +108,13 @@ def process_fuzz(message):
     wl = os.path.join(BASE_DIR, "common.txt")
     if not os.path.exists(wl):
         with open(wl, "w") as f: f.write("admin\nlogin\napi\n.env\n.git\n")
-    bot.send_message(message.chat.id, "🔍 **FFUF** inyectando payloads...")
-    subprocess.run(f"ffuf -u {url} -w {wl} -of md -o {path}", shell=True, timeout=300)
+    
+    # Mejora: Se añade -fc 404 para filtrar falsos positivos y evitar archivos vacíos
+    bot.send_message(message.chat.id, "🔍 **FFUF** inyectando payloads (Filtrando 404)...")
+    subprocess.run(f"ffuf -u {url} -w {wl} -fc 404 -of md -o {path}", shell=True, timeout=300)
     enviar_archivo_seguro(message.chat.id, path, f"🔍 Fuzzing en `{url}`")
 
-# --- NUEVO COMANDO: ARCHIVOS (LEAKS/NUCLEI) ---
+# --- ARCHIVOS (LEAKS/NUCLEI) ---
 @bot.message_handler(commands=['archivos'])
 def start_leaks(message):
     msg = bot.send_message(message.chat.id, "📂 **Introduce URL para buscar filtraciones:**")
@@ -128,7 +128,7 @@ def process_leaks(message):
     subprocess.run(f"nuclei -u {target} -tags exposure,token,leak,file -silent -o {path}", shell=True, timeout=400)
     enviar_archivo_seguro(message.chat.id, path, f"📂 Filtraciones halladas en `{target}`")
 
-# --- NUEVO COMANDO: FUERZA BRUTA (HYDRA) ---
+# --- FUERZA BRUTA (HYDRA) ---
 @bot.message_handler(commands=['fuerza'])
 def start_hydra(message):
     msg = bot.send_message(message.chat.id, "⚡ **Formato: [IP] [Servicio] [User]**\nEj: `1.1.1.1 ssh root`")
@@ -148,7 +148,7 @@ def process_hydra(message):
         enviar_archivo_seguro(message.chat.id, path, f"⚡ Brute Force en `{ip}`")
     except: bot.send_message(message.chat.id, "❌ Formato incorrecto.")
 
-# --- COMANDOS: AUDITAR Y DIR ---
+# --- AUDITAR Y DIR ---
 @bot.message_handler(commands=['auditar'])
 def start_audit(message):
     msg = bot.send_message(message.chat.id, "🔓 **Introduce URL para Escaneo CVE:**")
@@ -172,8 +172,10 @@ def process_dir(message):
     archivo = f"dir_{int(time.time())}.txt"
     path = os.path.join(BASE_DIR, archivo)
     wl = os.path.join(BASE_DIR, "common.txt")
-    bot.send_message(message.chat.id, f"🚀 **Gobuster** en `{url}`...")
-    subprocess.run(f"gobuster dir -u {url} -w {wl} -t 20 -o {path} --no-error -n", shell=True)
+    
+    # Mejora: Se añade -b 404 para que Gobuster no guarde errores en el archivo
+    bot.send_message(message.chat.id, f"🚀 **Gobuster** en `{url}` (Filtrando 404)...")
+    subprocess.run(f"gobuster dir -u {url} -w {wl} -b 404 -o {path} --no-error -n", shell=True)
     enviar_archivo_seguro(message.chat.id, path, f"📂 Directorios de `{url}`")
 
 # --- MENÚ Y AYUDA ---
@@ -181,14 +183,14 @@ def process_dir(message):
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v11.0 Pro**\n\n"
+            "🤖 **Bugtin Bot v11.5 Pro**\n\n"
             "📡 `/subs` - Subdominios + IP\n"
-            "🕸️ `/crawl` - Descubrimiento de rutas\n"
-            "🔍 `/fuzz` - Inyección de parámetros\n"
+            "🕸️ `/crawl` - Katana Crawling\n"
+            "🔍 `/fuzz` - FFUF (Filtro 404)\n"
             "📂 `/archivos` - Filtraciones y Leaks\n"
             "🔓 `/auditar` - Escaneo profundo CVE\n"
-            "⚡ `/fuerza` - Fuerza bruta (Hydra)\n"
-            "📂 `/dir` - Gobuster"
+            "⚡ `/fuerza` - Hydra Brute Force\n"
+            "📂 `/dir` - Gobuster (Filtro 404)"
         )
         bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
 
@@ -197,5 +199,5 @@ def router(m):
     if "sub" in m.text.lower(): start_subs(m)
     elif "audit" in m.text.lower(): start_audit(m)
 
-print("🚀 Bugtin Bot v11.0 PRO Suite - Resolución Forzada Activa")
+print("🚀 Bugtin Bot v11.5 PRO - Optimizaciones para Termux Activas")
 bot.polling(none_stop=True)
