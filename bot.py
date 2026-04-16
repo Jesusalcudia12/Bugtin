@@ -16,10 +16,10 @@ bot = telebot.TeleBot(TOKEN)
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v6.6 - Stable Edition**\n\n"
+            "🤖 **Bugtin Bot v6.7 - Reportes Directos**\n\n"
             "📡 `/subs` - Reconocimiento de subdominios.\n"
             "🔓 `/archivos` - Escaneo de vulnerabilidades.\n\n"
-            "🛡️ *Optimizado para evitar bloqueos y errores de sintaxis.*"
+            "📥 *Los hallazgos de Nuclei y Gobuster se envían directamente aquí.*"
         )
         
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -29,6 +29,7 @@ def send_welcome(message):
 # --- FUNCIONES DE APOYO ---
 def run_command(command):
     try:
+        # Ejecutamos con shell=True y capturamos errores silenciosamente
         subprocess.run(command, shell=True, check=True)
     except subprocess.CalledProcessError:
         pass
@@ -48,8 +49,8 @@ def process_subdomains_step(message):
     run_command("rm -f total_subs.txt res_esp.txt res_tec.txt subs_pasivos.txt")
 
     try:
-        # 1. Subfinder
-        run_command(f"subfinder -d {target} -o subs_pasivos.txt")
+        # 1. Subfinder (Modo silencioso)
+        run_command(f"subfinder -d {target} -o subs_pasivos.txt -silent")
 
         # 2. Gobuster DNS (Sintaxis compatible y lenta para evitar timeout)
         if os.path.exists("common.txt"):
@@ -58,7 +59,7 @@ def process_subdomains_step(message):
         if os.path.exists("tecnico.txt"):
             run_command(f"gobuster dns --domain {target} --wordlist tecnico.txt --delay 100ms -t 10 --quiet --output res_tec.txt")
 
-        # Unificar
+        # Unificar resultados
         run_command("touch total_subs.txt")
         for f in ["subs_pasivos.txt", "res_esp.txt", "res_tec.txt"]:
             if os.path.exists(f) and os.path.getsize(f) > 0:
@@ -68,13 +69,13 @@ def process_subdomains_step(message):
 
         if os.path.exists("total_subs.txt") and os.path.getsize("total_subs.txt") > 0:
             with open("total_subs.txt", "rb") as doc:
-                bot.send_document(chat_id, doc, caption=f"🏁 Resultados: {target}")
+                bot.send_document(chat_id, doc, caption=f"🏁 Lista de subdominios: {target}")
         else:
             bot.send_message(chat_id, "❌ No se encontraron subdominios.")
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: ARCHIVOS/VULNS ---
+# --- LÓGICA: ARCHIVOS/VULNS (REPORTE AL BOT) ---
 @bot.message_handler(commands=['archivos'])
 def start_archivos(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
@@ -86,25 +87,37 @@ def process_vulns_step(message):
     chat_id = message.chat.id
     output_file = f"reporte_{target}.txt"
     
-    bot.send_message(chat_id, f"🔍 Escaneando `{target}`...", parse_mode="Markdown")
+    bot.send_message(chat_id, f"🔍 Escaneando `{target}`... Los resultados aparecerán aquí.", parse_mode="Markdown")
     
     try:
-        run_command(f"nuclei -u {target} -tags exposure,cve -o {output_file} -silent")
+        # 1. Nuclei (Envía salida al archivo y se mantiene en silencio en terminal)
+        run_command(f"nuclei -u {target} -tags exposure,cve,critical,panel -o {output_file} -silent")
         
+        # 2. Gobuster Dir para rutas críticas
         for l in ["api-routes.txt", "logins.txt"]:
             if os.path.exists(l):
-                run_command(f"gobuster dir --url {target} --wordlist {l} --delay 200ms -t 5 --quiet --output temp_dir.txt")
-                if os.path.exists("temp_dir.txt"):
-                    run_command(f"cat temp_dir.txt >> {output_file}")
-                    run_command("rm temp_dir.txt")
+                temp_dir = "temp_dir.txt"
+                run_command(f"gobuster dir --url {target} --wordlist {l} --delay 200ms -t 5 --quiet --output {temp_dir}")
+                if os.path.exists(temp_dir):
+                    run_command(f"cat {temp_dir} >> {output_file}")
+                    run_command(f"rm {temp_dir}")
 
+        # 3. Enviar el reporte final al chat de Telegram
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+            # Obtener una pequeña vista previa de los primeros hallazgos
+            with open(output_file, "r") as f:
+                content = f.readlines()
+                preview = "".join(content[:5]) # Primeras 5 líneas
+
+            bot.send_message(chat_id, f"✅ **Escaneo completado**\n\n**Hallazgos detectados:**\n`{preview}...`", parse_mode="Markdown")
+            
             with open(output_file, "rb") as doc:
-                bot.send_document(chat_id, doc, caption=f"❗ Hallazgos en {target}")
+                bot.send_document(chat_id, doc, caption=f"📄 Reporte completo: {target}")
         else:
-            bot.send_message(chat_id, f"✅ Sin fallos evidentes en {target}.")
+            bot.send_message(chat_id, f"✅ No se encontraron fallos críticos ni archivos expuestos en `{target}`.")
+            
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
+        bot.send_message(chat_id, f"⚠️ Error durante el escaneo: {str(e)}")
 
 # --- MANEJADORES DE BOTONES ---
 @bot.message_handler(func=lambda m: m.text == "📡 Solo Subdominios")
@@ -113,5 +126,5 @@ def b1(m): start_subs(m)
 @bot.message_handler(func=lambda m: m.text == "🔓 Buscar Archivos Expuestos")
 def b2(m): start_archivos(m)
 
-print("🚀 Bugtin Bot v6.6 Online.")
+print("🚀 Bugtin Bot v6.7 Online. Todo listo.")
 bot.polling()
