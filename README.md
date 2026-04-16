@@ -54,11 +54,15 @@ wget [https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery
 # Páginas de Login
 wget [https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/Logins.fuzz.txt](https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/Logins.fuzz.txt) -O logins.txt
 
+---
 
-🚀 Modo de Uso
-Una vez configurado tu TOKEN y YOUR_CHAT_ID en el archivo bot.py, inicia el bot con:
+## 🚀 Modo de Uso
 
+Una vez configurado tu `TOKEN` y `YOUR_CHAT_ID` en el archivo `bot.py`, inicia el bot con:
+
+```bash
 python bot.py
+
 Comandos Disponibles:
 /start o /help: Muestra el menú interactivo y la guía de uso.
 
@@ -66,7 +70,9 @@ Comandos Disponibles:
 
 /archivos [dominio]: Inicia el escaneo de vulnerabilidades, paneles y logins.
 
-📋 Estructura de Diccionarios
+---
+
+## 📋 Estructura de Diccionarios
 common.txt: Optimizado para objetivos en México, España y Colombia.
 
 tecnico.txt: Enfocado en infraestructura global y servidores.
@@ -75,23 +81,15 @@ api_routes.txt: Especializado en encontrar rutas de Consul y microservicios.
 
 logins.txt: Diseñado para detectar formularios de acceso y autenticación.
 
-👤 Créditos y Desarrolladores
+---
+
+## 👤 Créditos y Desarrolladores
 Este proyecto es mantenido por:
 
-Jesús Alcudia - jesusalcudia12
+Jesús Alcudia - OwenDarck
 
-OwenDarck (Nombre Público)
+---
 
-Descargo de responsabilidad: El uso de esta herramienta para atacar objetivos sin consentimiento previo es ilegal. Los desarrolladores no se hacen responsables del mal uso de este software.
+## Descargo de responsabilidad:
+El uso de esta herramienta para atacar objetivos sin consentimiento previo es ilegal. Los desarrolladores no se hacen responsables del mal uso de este software.
 
-
-***
-
-### Instrucciones finales para tu GitHub:
-1.  Ve a tu repositorio en la web de GitHub.
-2.  Haz clic en **"Add file"** -> **"Create new file"**.
-3.  Ponle de nombre `README.md`.
-4.  Pega el texto de arriba.
-5.  Haz clic en **"Commit changes"**.
-
-¡Con esto tu perfil de GitHub se verá como el de un profesional del Bug Bounty!
