@@ -15,12 +15,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- UTILIDADES ---
 def ejecutar_en_hilo(func, message):
+    """Mantiene el bot receptivo mientras se ejecutan herramientas pesadas"""
     thread = threading.Thread(target=func, args=(message,))
     thread.start()
 
 def enviar_archivo_seguro(chat_id, ruta, caption):
-    """Verificación mejorada para Termux con espera de escritura"""
-    time.sleep(4) 
+    """Espera la escritura y envía resultados en .txt para ver en Acode/Kiwi"""
+    # Reintentos para dar tiempo a Termux de cerrar el archivo
+    for _ in range(6):
+        if os.path.exists(ruta) and os.path.getsize(ruta) > 0:
+            break
+        time.sleep(2)
+
     if os.path.exists(ruta) and os.path.getsize(ruta) > 0:
         try:
             with open(ruta, "rb") as f:
@@ -30,90 +36,123 @@ def enviar_archivo_seguro(chat_id, ruta, caption):
             bot.send_message(chat_id, f"❌ Error de envío: {str(e)}")
     else:
         if os.path.exists(ruta): os.remove(ruta)
-        bot.send_message(chat_id, "⚠️ No se encontraron resultados o el servidor bloqueó la conexión (Archivo vacío).")
+        bot.send_message(chat_id, "⚠️ El escaneo terminó sin resultados o fue bloqueado por el servidor.")
 
-# --- COMANDOS ---
+# --- MOTOR DE RECONOCIMIENTO (SUBS + IP) ---
 
 @bot.message_handler(commands=['subs'])
 def start_subs(message):
-    msg = bot.send_message(message.chat.id, "📡 **Introduce el dominio para extraer subdominios con IP:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_subs_with_ip, m))
+    msg = bot.send_message(message.chat.id, "📡 **Introduce el dominio:**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_subs_full, m))
 
-def process_subs_with_ip(message):
+def process_subs_full(message):
     target = message.text.strip().lower().replace("https://", "").replace("http://", "").split("/")[0]
     chat_id = message.chat.id
-    output_raw = os.path.join(BASE_DIR, f"raw_subs_{target}.txt")
-    output_final = os.path.join(BASE_DIR, f"resolved_subs_{target}.txt")
-    
-    bot.send_message(chat_id, f"🔍 Extrayendo subdominios para `{target}`...")
-    
+    output = os.path.join(BASE_DIR, f"infra_{target}.txt")
+    bot.send_message(chat_id, f"🔍 Extrayendo subdominios e IPs para `{target}`...")
     try:
-        # Extracción inicial
-        subprocess.run(f"subfinder -d {target} -silent -o {output_raw}", shell=True, timeout=180)
-        
-        if not os.path.exists(output_raw) or os.path.getsize(output_raw) == 0:
-            with open(output_raw, "w") as f:
-                f.write(f"www.{target}\nmail.{target}\napi.{target}\nftp.{target}\n")
-
-        bot.send_message(chat_id, f"📡 Resolviendo direcciones IP...")
-        
-        # Resolución de IP integrada
-        with open(output_raw, "r") as f_in, open(output_final, "w") as f_out:
-            subs_vistos = set()
-            for line in f_in:
-                sub = line.strip()
-                if not sub or sub in subs_vistos: continue
-                subs_vistos.add(sub)
-                # Comando 'host' para obtener la IP
-                res = subprocess.run(f"host {sub}", shell=True, capture_output=True, text=True)
-                match = re.search(r'address\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', res.stdout)
-                ip_addr = match.group(1) if match else "0.0.0.0"
-                f_out.write(f"✅ {sub} [{ip_addr}]\n")
-
-        enviar_archivo_seguro(chat_id, output_final, f"🏁 Lista de subdominios e IPs: `{target}`")
-        if os.path.exists(output_raw): os.remove(output_raw)
-        
+        res = subprocess.run(f"subfinder -d {target} -silent", shell=True, capture_output=True, text=True)
+        with open(output, "w") as f:
+            f.write(f"--- REPORTE INFRAESTRUCTURA: {target.upper()} ---\n\n")
+            for sub in res.stdout.splitlines():
+                if not sub: continue
+                # comando 'host' de dnsutils instalado en Termux
+                h_res = subprocess.run(f"host {sub}", shell=True, capture_output=True, text=True).stdout
+                ip = re.search(r'address\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', h_res)
+                f.write(f"✅ {sub} -> [{ip.group(1) if ip else '0.0.0.0'}]\n")
+        enviar_archivo_seguro(chat_id, output, f"🏁 Recon de `{target}` finalizado.")
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Error en motor subs: {str(e)}")
+        bot.send_message(chat_id, f"❌ Error: {str(e)}")
 
-@bot.message_handler(commands=['crawl'])
-def start_crawl(message):
-    msg = bot.send_message(message.chat.id, "🕸️ **URL para Crawling (Katana):**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_crawl, m))
+# --- ANÁLISIS MÓVIL (APK SECRETS) ---
 
-def process_crawl(message):
-    target = message.text.strip()
-    archivo = f"crawl_{int(time.time())}.txt"
-    path = os.path.join(BASE_DIR, archivo)
-    bot.send_message(message.chat.id, "🕸️ **Katana** analizando (Profundidad 3 + JS)...")
-    subprocess.run(f"katana -u {target} -silent -jc -kf -d 3 -o {path}", shell=True, timeout=300)
-    enviar_archivo_seguro(message.chat.id, path, f"🕸️ Rutas halladas en `{target}`")
+@bot.message_handler(commands=['apk'])
+def start_apk(message):
+    msg = bot.send_message(message.chat.id, "📱 **Sube el archivo .apk para auditar:**")
+    bot.register_next_step_handler(msg, process_apk_file)
 
-@bot.message_handler(commands=['archivos'])
-def start_leaks(message):
-    msg = bot.send_message(message.chat.id, "📂 **URL para buscar Leaks:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_leaks, m))
+def process_apk_file(message):
+    if not message.document or not message.document.file_name.lower().endswith('.apk'):
+        bot.send_message(message.chat.id, "❌ Envía un archivo `.apk` válido.")
+        return
+    chat_id = message.chat.id
+    file_info = bot.get_file(message.document.file_id)
+    downloaded = bot.download_file(file_info.file_path)
+    local_apk = os.path.join(BASE_DIR, message.document.file_name)
+    report_apk = os.path.join(BASE_DIR, f"secretos_{message.document.file_name}.txt")
+    with open(local_apk, 'wb') as f: f.write(downloaded)
+    bot.send_message(chat_id, "⚙️ **Analizando binario...** (Buscando Keys, IPs y Endpoints)")
+    try:
+        # comando 'strings' de binutils instalado en Termux
+        cmd = (f"strings '{local_apk}' | grep -E 'http://|https://|[0-9]{{1,3}}\.[0-9]{{1,3}}\.[0-9]{{1,3}}\.[0-9]{{1,3}}|AIza[0-9A-Za-z-_]{{35}}' "
+               f"> '{report_apk}'")
+        subprocess.run(cmd, shell=True)
+        if os.path.exists(local_apk): os.remove(local_apk)
+        enviar_archivo_seguro(chat_id, report_apk, f"📱 Secretos del APK: `{message.document.file_name}`")
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Error APK: {str(e)}")
 
-def process_leaks(message):
-    target = message.text.strip()
-    archivo = f"leaks_{int(time.time())}.txt"
-    path = os.path.join(BASE_DIR, archivo)
-    bot.send_message(message.chat.id, "📂 **Nuclei** buscando exposición de datos...")
-    subprocess.run(f"nuclei -u {target} -tags exposure,token,leak -H 'User-Agent: Googlebot/2.1' -rl 10 -silent -o {path}", shell=True, timeout=400)
-    enviar_archivo_seguro(message.chat.id, path, f"📂 Hallazgos en `{target}`")
+# --- FUERZA BRUTA (HYDRA) ---
+
+@bot.message_handler(commands=['fuerza'])
+def start_hydra(message):
+    instrucciones = (
+        "⚡ **Modo Hydra Pro**\n\n"
+        "Introduce los datos en este formato:\n"
+        "`[IP] [Servicio] [Usuario]`\n\n"
+        "Ejemplo: `192.168.1.1 ssh admin`"
+    )
+    msg = bot.send_message(message.chat.id, instrucciones, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_hydra, m))
+
+def process_hydra(message):
+    try:
+        parts = message.text.split()
+        if len(parts) < 3:
+            bot.send_message(message.chat.id, "❌ Formato incompleto. Usa: `IP Servicio Usuario`")
+            return
+            
+        ip, svc, usr = parts[0], parts[1], parts[2]
+        report = os.path.join(BASE_DIR, f"hydra_{ip}.txt")
+        pwl = os.path.join(BASE_DIR, "pass.txt")
+        
+        # Crear diccionario básico si no existe
+        if not os.path.exists(pwl):
+            with open(pwl, "w") as f: f.write("123456\nadmin\npassword\nroot\n12345\n")
+            
+        bot.send_message(message.chat.id, f"⚡ **Hydra** atacando `{svc}` en `{ip}` con el usuario `{usr}`...")
+        
+        # Ejecución de Hydra
+        subprocess.run(f"hydra -l {usr} -P {pwl} {ip} {svc} -o {report}", shell=True, timeout=600)
+        enviar_archivo_seguro(message.chat.id, report, f"⚡ Resultados Brute Force: `{ip}`")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Error en Hydra: {str(e)}")
+
+# --- AUDITORÍA WEB Y CRAWLING ---
 
 @bot.message_handler(commands=['auditar'])
 def start_audit(message):
-    msg = bot.send_message(message.chat.id, "🔓 **URL para Auditoría CVE:**")
+    msg = bot.send_message(message.chat.id, "🔓 **Introduce URL para Nuclei:**")
     bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_audit, m))
 
 def process_audit(message):
     target = message.text.strip()
-    archivo = f"audit_{int(time.time())}.txt"
-    path = os.path.join(BASE_DIR, archivo)
-    bot.send_message(message.chat.id, "🛰️ **Nuclei** auditando...")
-    subprocess.run(f"nuclei -u {target} -rl 5 -c 2 -H 'User-Agent: Mozilla/5.0' -silent -o {path}", shell=True, timeout=600)
-    enviar_archivo_seguro(message.chat.id, path, f"📄 Reporte CVE: `{target}`")
+    path = os.path.join(BASE_DIR, f"audit_{int(time.time())}.txt")
+    bot.send_message(message.chat.id, "🛰️ Nuclei auditando vulnerabilidades...")
+    subprocess.run(f"nuclei -u {target} -rl 10 -silent -o {path}", shell=True)
+    enviar_archivo_seguro(message.chat.id, path, f"📄 Auditoría CVE: `{target}`")
+
+@bot.message_handler(commands=['crawl'])
+def start_crawl(message):
+    msg = bot.send_message(message.chat.id, "🕸️ **Introduce URL para Katana:**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_crawl, m))
+
+def process_crawl(message):
+    target = message.text.strip()
+    path = os.path.join(BASE_DIR, f"crawl_{int(time.time())}.txt")
+    bot.send_message(message.chat.id, "🕸️ Katana extrayendo rutas y endpoints JS...")
+    subprocess.run(f"katana -u {target} -silent -jc -kf -o {path}", shell=True)
+    enviar_archivo_seguro(message.chat.id, path, f"🕸️ Crawl: `{target}`")
 
 @bot.message_handler(commands=['fuzz'])
 def start_fuzz(message):
@@ -122,62 +161,42 @@ def start_fuzz(message):
 
 def process_fuzz(message):
     url = message.text.strip()
-    archivo = f"fuzz_{int(time.time())}.txt"
-    path = os.path.join(BASE_DIR, archivo)
+    path = os.path.join(BASE_DIR, f"fuzz_{int(time.time())}.txt")
     wl = os.path.join(BASE_DIR, "common.txt")
     if not os.path.exists(wl):
-        with open(wl, "w") as f: f.write("admin\nlogin\napi\n.env\n")
-    bot.send_message(message.chat.id, "🔍 **FFUF** ejecutando...")
-    subprocess.run(f"ffuf -u {url} -w {wl} -fc 404 -of md -o {path}", shell=True, timeout=300)
+        with open(wl, "w") as f: f.write("admin\napi\nlogin\n.env\n.git\n")
+    bot.send_message(message.chat.id, "🔍 FFUF buscando archivos ocultos...")
+    subprocess.run(f"ffuf -u {url} -w {wl} -fc 404 -of md -o {path}", shell=True)
     enviar_archivo_seguro(message.chat.id, path, f"🔍 Fuzzing: `{url}`")
 
 @bot.message_handler(commands=['dir'])
 def start_dir(message):
-    msg = bot.send_message(message.chat.id, "📂 **Introduce URL:**")
+    msg = bot.send_message(message.chat.id, "📂 **URL para Gobuster:**")
     bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_dir, m))
 
 def process_dir(message):
     url = message.text.strip()
-    archivo = f"dir_{int(time.time())}.txt"
-    path = os.path.join(BASE_DIR, archivo)
+    path = os.path.join(BASE_DIR, f"dir_{int(time.time())}.txt")
     wl = os.path.join(BASE_DIR, "common.txt")
-    bot.send_message(message.chat.id, f"🚀 **Gobuster** analizando...")
+    bot.send_message(message.chat.id, "🚀 Gobuster buscando directorios...")
     subprocess.run(f"gobuster dir -u {url} -w {wl} -b 404 -o {path} --no-error -n", shell=True)
     enviar_archivo_seguro(message.chat.id, path, f"📂 Directorios: `{url}`")
-
-@bot.message_handler(commands=['fuerza'])
-def start_hydra(message):
-    msg = bot.send_message(message.chat.id, "⚡ **Formato: [IP] [Servicio] [User]**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_hydra, m))
-
-def process_hydra(message):
-    try:
-        parts = message.text.split()
-        ip, svc, usr = parts[0], parts[1], parts[2]
-        archivo = f"hydra_{int(time.time())}.txt"
-        path = os.path.join(BASE_DIR, archivo)
-        pwl = os.path.join(BASE_DIR, "pass.txt")
-        if not os.path.exists(pwl):
-             with open(pwl, "w") as f: f.write("123456\nadmin\npassword\n")
-        bot.send_message(message.chat.id, f"⚡ **Hydra** atacando {svc}...")
-        subprocess.run(f"hydra -l {usr} -P {pwl} {ip} {svc} -o {path}", shell=True, timeout=300)
-        enviar_archivo_seguro(message.chat.id, path, f"⚡ Brute Force en `{ip}`")
-    except: bot.send_message(message.chat.id, "❌ Formato incorrecto.")
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
-        help_text = (
-            "🤖 **Bugtin Bot v12.0 Ultimate**\n\n"
-            "📡 `/subs` - Subdominios + **IP Resolve**\n"
-            "🕸️ `/crawl` - Katana Deep (JS Extractor)\n"
+        help_txt = (
+            "🤖 **Bugtin Bot v14.0 Ultimate Pro**\n\n"
+            "📡 `/subs` - Subdominios + IPs\n"
+            "📱 `/apk` - Análisis estático de APKs\n"
+            "⚡ `/fuerza` - Hydra (Brute Force)\n"
+            "🕸️ `/crawl` - Katana (JS & Endpoints)\n"
             "🔍 `/fuzz` - FFUF (Filtro 404)\n"
-            "📂 `/archivos` - Leaks (Googlebot Mode)\n"
-            "🔓 `/auditar` - CVE (Modo Anti-WAF)\n"
-            "⚡ `/fuerza` - Hydra\n"
-            "📂 `/dir` - Gobuster"
+            "🔓 `/auditar` - Nuclei (Vulnerabilidades)\n"
+            "📂 `/dir` - Gobuster (Directorios)"
         )
-        bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
+        bot.send_message(message.chat.id, help_txt, parse_mode="Markdown")
 
-print("🚀 Bugtin Bot v12.0 - IP Resolver engine listo")
+# --- INICIO ---
+print("🚀 Bugtin Bot v14.0 Online - Suite de Seguridad Completa (Hydra Inc.)")
 bot.polling(none_stop=True)
