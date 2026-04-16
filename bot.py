@@ -71,15 +71,16 @@ def descargar_filtracion(url, chat_id):
 def send_welcome(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
         help_text = (
-            "🤖 **Bugtin Bot v8.8 - Expert Mode**\n\n"
+            "🤖 **Bugtin Bot v8.9 - Expert Mode**\n\n"
             "📡 `/subs` - Recon de subdominios.\n"
             "🔓 `/archivos` - Escaneo y exfiltración automática.\n"
+            "🔍 `/fuzz` - Buscar paneles con logins.txt.\n"
             "⚡ `/fuerza` - Ataque Hydra con ejemplos.\n\n"
-            "🚀 *Estado: Configurado con soporte hydra.sh local.*"
+            "🚀 *Estado: Integración con logins.txt activa.*"
         )
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         markup.add("📡 Solo Subdominios", "🔓 Buscar Archivos Expuestos")
-        markup.add("⚡ Ataque de Fuerza Bruta")
+        markup.add("🔍 Fuzzing de Logins", "⚡ Ataque de Fuerza Bruta")
         bot.send_message(message.chat.id, help_text, reply_markup=markup, parse_mode="Markdown")
 
 # --- LÓGICA: RECONOCIMIENTO ---
@@ -111,6 +112,41 @@ def process_subdomains_step(message):
             bot.send_message(chat_id, "❌ No se encontraron resultados.")
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
+
+# --- LÓGICA: FUZZING DE LOGINS (Uso de logins.txt) ---
+@bot.message_handler(commands=['fuzz'])
+def start_fuzzing(message):
+    if str(message.chat.id) == YOUR_CHAT_ID:
+        msg = bot.send_message(message.chat.id, "🎯 **Introduce la URL para buscar paneles (ej: https://objetivo.com):**")
+        bot.register_next_step_handler(msg, process_fuzzing_step)
+
+def process_fuzzing_step(message):
+    url = message.text.strip().lower()
+    chat_id = message.chat.id
+    wordlist = "logins.txt"
+    output = "fuzz_results.txt"
+
+    if not os.path.exists(wordlist):
+        bot.send_message(chat_id, f"❌ No se encontró `{wordlist}`. Súbelo a la carpeta del bot.")
+        return
+
+    bot.send_message(chat_id, f"🔍 Escaneando rutas en `{url}`...")
+    try:
+        # Ejecuta gobuster dir para encontrar códigos 200, 204, 301, 302, 307
+        subprocess.run(f"gobuster dir -u {url} -w {wordlist} --quiet -z --output {output}", shell=True)
+        
+        if os.path.exists(output) and os.path.getsize(output) > 0:
+            with open(output, "r") as f:
+                resultados = f.read()
+                bot.send_message(chat_id, f"🎯 **Rutas Encontradas:**\n\n`{resultados}`", parse_mode="Markdown")
+            
+            with open(output, "rb") as doc:
+                bot.send_document(chat_id, doc, caption=f"📄 Fuzzing completo: {url}")
+            os.remove(output)
+        else:
+            bot.send_message(chat_id, "✅ No se detectaron paneles de acceso públicos.")
+    except Exception as e:
+        bot.send_message(chat_id, f"⚠️ Error en Fuzzing: {str(e)}")
 
 # --- LÓGICA: AUDITORÍA Y EXFILTRACIÓN ---
 @bot.message_handler(commands=['archivos'])
@@ -146,7 +182,7 @@ def process_vulns_step(message):
     except Exception as e:
         bot.send_message(chat_id, f"⚠️ Error: {str(e)}")
 
-# --- LÓGICA: FUERZA BRUTA (Hydra con ejemplos detallados) ---
+# --- LÓGICA: FUERZA BRUTA (Hydra) ---
 @bot.message_handler(commands=['fuerza'])
 def start_fuerza(message):
     if str(message.chat.id) == YOUR_CHAT_ID:
@@ -205,8 +241,10 @@ def process_fuerza_step(message):
 def btn_subs(m): start_subs(m)
 @bot.message_handler(func=lambda m: m.text == "🔓 Buscar Archivos Expuestos")
 def btn_arch(m): start_archivos(m)
+@bot.message_handler(func=lambda m: m.text == "🔍 Fuzzing de Logins")
+def btn_fuzz(m): start_fuzzing(m)
 @bot.message_handler(func=lambda m: m.text == "⚡ Ataque de Fuerza Bruta")
 def btn_fuerza(m): start_fuerza(m)
 
-print("🚀 Bugtin Bot v8.8 Online. Motor Hydra con ejemplos listo.")
+print("🚀 Bugtin Bot v8.9 Online. Integración de logins.txt lista.")
 bot.polling()
