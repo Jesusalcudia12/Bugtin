@@ -89,10 +89,10 @@ def send_welcome(message):
         markup.add("⚡ Ataque Hydra")
         bot.send_message(message.chat.id, help_text, reply_markup=markup, parse_mode="Markdown")
 
-# --- COMANDO: SUBDOMINIOS CON RESOLUCIÓN DE IP ---
+# --- COMANDO: SUBDOMINIOS ---
 @bot.message_handler(commands=['subs'])
 def start_subs(message):
-    msg = bot.send_message(message.chat.id, "📡 **Introduce el dominio para extraer Subdominios + IPs:**", parse_mode="Markdown")
+    msg = bot.send_message(message.chat.id, "📡 **Introduce el dominio (ejemplo.com):**", parse_mode="Markdown")
     bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(process_subdomains_step, m))
 
 def process_subdomains_step(message):
@@ -102,29 +102,52 @@ def process_subdomains_step(message):
     output_raw = f"raw_{target}.txt"
     output_final = f"subs_ips_{target}.txt"
     
+    # Verificar si subfinder existe
+    check_tool = subprocess.run("command -v subfinder", shell=True, capture_output=True)
+    if check_tool.returncode != 0:
+        bot.send_message(chat_id, "❌ **Error:** `subfinder` no está instalado en este sistema.")
+        return
+
     bot.send_message(chat_id, f"🚀 Escaneando `{target}` y resolviendo IPs...", parse_mode="Markdown")
     
     try:
-        # 1. Obtenemos subdominios de forma silenciosa
-        subprocess.run(f"subfinder -d {target} -silent -o {output_raw}", shell=True, timeout=120)
+        # 1. Ejecución de subfinder
+        subprocess.run(f"subfinder -d {target} -silent -o {output_raw}", shell=True, timeout=180)
         
         if os.path.exists(output_raw) and os.path.getsize(output_raw) > 0:
-            # 2. Resolución de IP mediante un bucle de shell rápido (ping simple para obtener IP)
-            # Esto crea un archivo con formato: subdominio.com [1.2.3.4]
-            script_resolver = f"while read sub; do ip=$(getent hosts $sub | awk '{{print $1}}'); if [ ! -z \"$ip\" ]; then echo \"$sub [$ip]\" >> {output_final}; else echo \"$sub [No IP]\" >> {output_final}; fi; done < {output_raw}"
-            subprocess.run(script_resolver, shell=True)
+            # 2. Resolución de IP más robusta usando nslookup/host
+            with open(output_raw, "r") as f_in, open(output_final, "w") as f_out:
+                for line in f_in:
+                    sub = line.strip()
+                    if not sub: continue
+                    # Intentar obtener IP
+                    try:
+                        res = subprocess.run(f"host {sub}", shell=True, capture_output=True, text=True, timeout=5)
+                        if res.returncode == 0:
+                            # Extraer IP de la salida de 'host'
+                            ips = re.findall(r'has address (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', res.stdout)
+                            ip_str = ips[0] if ips else "No IP"
+                            f_out.write(f"{sub} [{ip_str}]\n")
+                        else:
+                            f_out.write(f"{sub} [No Resolvió]\n")
+                    except:
+                        f_out.write(f"{sub} [Error]\n")
 
-            if os.path.exists(output_final):
+            if os.path.exists(output_final) and os.path.getsize(output_final) > 0:
                 with open(output_final, "rb") as f:
-                    bot.send_document(chat_id, f, caption=f"🏁 Lista de Subdominios e IPs para: `{target}`", parse_mode="Markdown")
+                    bot.send_document(chat_id, f, caption=f"🏁 Resultados para: `{target}`", parse_mode="Markdown")
                 os.remove(output_final)
+            else:
+                bot.send_message(chat_id, "❌ Error al generar el archivo de IPs.")
             
             os.remove(output_raw)
         else:
-            bot.send_message(chat_id, "❌ No se encontraron subdominios públicos.")
+            bot.send_message(chat_id, f"❌ No se hallaron subdominios para `{target}`.")
             
+    except subprocess.TimeoutExpired:
+        bot.send_message(chat_id, "⚠️ El proceso tardó demasiado (Timeout).")
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Error en reconocimiento: {str(e)}")
+        bot.send_message(chat_id, f"⚠️ Error Crítico: {str(e)}")
 
 # --- COMANDO: CRAWLING ---
 @bot.message_handler(commands=['crawl'])
@@ -236,5 +259,5 @@ def router(m):
     elif m.text == "🔓 Auditoría IA": start_audit(m)
     elif m.text == "⚡ Ataque Hydra": start_fuerza(m)
 
-print("🚀 Bugtin Bot v9.5 ONLINE - Resolución IP Activada")
+print("🚀 Bugtin Bot v9.5 ONLINE - Corrección /subs Aplicada")
 bot.polling(none_stop=True)
