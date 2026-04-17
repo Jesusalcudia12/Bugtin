@@ -3,7 +3,6 @@ from telebot import types
 import subprocess
 import os
 import time
-import re
 import threading
 
 # --- CONFIGURACIÓN ---
@@ -13,14 +12,15 @@ YOUR_CHAT_ID = "6280594821"
 bot = telebot.TeleBot(TOKEN)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- CARGA DE TUS DICCIONARIOS ESPECÍFICOS ---
-def obtener_wordlist_maestra():
-    """Une tus archivos de GitHub para no fallar en el escaneo"""
-    archivos = ["logins.txt", "api-routes.txt", "tecnico.txt", "common.txt"]
+# --- GESTIÓN DE DICCIONARIOS ---
+def preparar_wordlist():
+    """Crea una lista maestra uniendo tus archivos locales para Gobuster/Fuzz"""
+    archivos = ["logins.txt", "api-routes.txt", "tecnico.txt", "common.txt", "passwords.txt"]
     maestra_path = os.path.join(BASE_DIR, "maestra.txt")
     
     with open(maestra_path, "w") as out:
-        out.write("index\nlogin\nadmin\nconfig\nconn\ndb\nsetup\napi\nsql\n.env\n")
+        # Rutas base de alta probabilidad
+        out.write("index\nlogin\nsignin\nadmin\nportal\nconfig\nsetup\napi\n.env\n")
         for f in archivos:
             p = os.path.join(BASE_DIR, f)
             if os.path.exists(p):
@@ -28,12 +28,13 @@ def obtener_wordlist_maestra():
                     out.write(src.read() + "\n")
     return maestra_path
 
-# --- UTILIDADES DE ENVÍO ---
-def ejecutar_en_hilo(func, message):
+# --- UTILIDADES ---
+def ejecutar_hilo(func, message):
     threading.Thread(target=func, args=(message,)).start()
 
-def enviar_reporte(chat_id, ruta, caption):
-    for _ in range(12):
+def enviar_doc(chat_id, ruta, titulo):
+    # Espera a que el archivo se genere y tenga contenido
+    for _ in range(15):
         if os.path.exists(ruta) and os.path.getsize(ruta) > 0:
             break
         time.sleep(1)
@@ -41,154 +42,128 @@ def enviar_reporte(chat_id, ruta, caption):
     if os.path.exists(ruta) and os.path.getsize(ruta) > 0:
         try:
             with open(ruta, "rb") as f:
-                bot.send_document(chat_id, f, caption=caption, parse_mode="Markdown")
+                bot.send_document(chat_id, f, caption=titulo, parse_mode="Markdown")
             os.remove(ruta)
         except Exception as e:
-            bot.send_message(chat_id, f"❌ Error enviando: {str(e)}")
+            bot.send_message(chat_id, f"❌ Error al enviar: {str(e)}")
     else:
         if os.path.exists(ruta): os.remove(ruta)
-        bot.send_message(chat_id, "⚠️ No se encontraron resultados. Verifica la URL o el diccionario.")
+        bot.send_message(chat_id, "⚠️ El escaneo terminó sin resultados o el sitio bloqueó la conexión.")
 
-# --- COMANDOS RECON ---
+# --- COMANDOS DE AUDITORÍA ---
+
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    if str(message.chat.id) != YOUR_CHAT_ID:
+        bot.send_message(message.chat.id, "🚫 No tienes permiso para usar este bot.")
+        return
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_dir = types.InlineKeyboardButton("📂 Directorios", callback_data="help_dir")
+    btn_subs = types.InlineKeyboardButton("📡 Subdominios", callback_data="help_subs")
+    btn_apk = types.InlineKeyboardButton("📱 APK Analizer", callback_data="help_apk")
+    btn_audit = types.InlineKeyboardButton("🛡️ Auditoría CVE", callback_data="help_audit")
+    markup.add(btn_dir, btn_subs, btn_apk, btn_audit)
+    
+    bienvenida = (
+        "🤖 **Bienvenido al Bugtin Bot**\n\n"
+        "Tu centro de mando para auditoría web desde Telegram.\n"
+        "Usa los botones o escribe `/help` para ver la sintaxis."
+    )
+    bot.send_message(message.chat.id, bienvenida, parse_mode="Markdown", reply_markup=markup)
 
 @bot.message_handler(commands=['dir'])
 def cmd_dir(message):
-    msg = bot.send_message(message.chat.id, "📂 **URL para buscar PHP/HTML/Directorios:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_dir, m))
+    msg = bot.send_message(message.chat.id, "📂 **URL para buscar directorios (.php, .html):**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_hilo(do_dir, m))
 
 def do_dir(message):
     url = message.text.strip()
-    path = os.path.join(BASE_DIR, f"res_dir_{int(time.time())}.txt")
-    wordlist = obtener_wordlist_maestra()
-    bot.send_message(message.chat.id, "🚀 Escaneando archivos .php y .html...")
-    # Se eliminó --wildcard porque tu versión de gobuster no lo soporta. 
-    # Se usa -x para buscar extensiones específicas.
-    cmd = f"gobuster dir -u {url} -w {wordlist} -x php,html,txt,bak,json -o {path} -k --no-error"
+    path = os.path.join(BASE_DIR, f"dir_{int(time.time())}.txt")
+    wordlist = preparar_wordlist()
+    bot.send_message(message.chat.id, "🚀 Escaneando con Gobuster (Simulación de Navegador)...")
+    cmd = (
+        f"gobuster dir -u {url} -w {wordlist} -x php,html,txt -o {path} -k "
+        f"-a 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' "
+        f"--no-error"
+    )
     subprocess.run(cmd, shell=True)
-    enviar_reporte(message.chat.id, path, f"📂 Hallazgos en `{url}`")
-
-@bot.message_handler(commands=['buscar_cc'])
-def cmd_cc(message):
-    msg = bot.send_message(message.chat.id, "💳 **URL para buscar CC en la Web:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_cc, m))
-
-def do_cc(message):
-    url = message.text.strip()
-    path = os.path.join(BASE_DIR, f"cc_{int(time.time())}.txt")
-    bot.send_message(message.chat.id, "💳 Buscando patrones de tarjetas en código y JS...")
-    regex = r'[3-5][0-9]{12,15}|[0-9]{2}/[0-9]{2,4}|cvv[":\s]+[0-9]{3,4}'
-    cmd = f"katana -u {url} -silent -jc -d 2 | xargs curl -sL | grep -E -o '{regex}' > {path}"
-    subprocess.run(cmd, shell=True)
-    enviar_reporte(message.chat.id, path, f"💳 Reporte CC: `{url}`")
-
-@bot.message_handler(commands=['buscar_db'])
-def cmd_db(message):
-    msg = bot.send_message(message.chat.id, "🗄️ **URL para buscar Bases de Datos:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_db, m))
-
-def do_db(message):
-    url = message.text.strip()
-    path = os.path.join(BASE_DIR, f"db_{int(time.time())}.txt")
-    wordlist = obtener_wordlist_maestra()
-    bot.send_message(message.chat.id, "🔍 Buscando .sql, .xls y backups...")
-    cmd = f"gobuster dir -u {url} -w {wordlist} -x sql,xls,xlsx,bak,zip,db -o {path} -k --no-error"
-    subprocess.run(cmd, shell=True)
-    enviar_reporte(message.chat.id, path, f"🗄️ Reporte DB: `{url}`")
-
-@bot.message_handler(commands=['apk'])
-def cmd_apk(message):
-    msg = bot.send_message(message.chat.id, "📱 **Sube el APK ahora:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_apk, m))
-
-def do_apk(message):
-    if not message.document: return
-    info = bot.get_file(message.document.file_id)
-    raw = bot.download_file(info.file_path)
-    tmp = os.path.join(BASE_DIR, "analisis.apk")
-    res = os.path.join(BASE_DIR, "apk_secrets.txt")
-    with open(tmp, 'wb') as f: f.write(raw)
-    # r'' delante de las comillas evita los SyntaxWarnings en Termux
-    regex = r'http[s]?://[^\s\'"]+|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|AIza[0-9A-Za-z-_]{35}'
-    subprocess.run(f"strings '{tmp}' | grep -E '{regex}' > '{res}'", shell=True)
-    if os.path.exists(tmp): os.remove(tmp)
-    enviar_reporte(message.chat.id, res, "📱 Secretos del APK")
-
-@bot.message_handler(commands=['fuerza'])
-def cmd_hydra(message):
-    msg = bot.send_message(message.chat.id, "⚡ **Formato: [IP] [Servicio] [Usuario]**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_hydra, m))
-
-def do_hydra(message):
-    try:
-        ip, svc, usr = message.text.split()
-        report = os.path.join(BASE_DIR, f"hydra_{ip}.txt")
-        bot.send_message(message.chat.id, f"⚡ Brute Force en {ip}...")
-        subprocess.run(f"hydra -l {usr} -P passwords.txt {ip} {svc} -o {report}", shell=True)
-        enviar_reporte(message.chat.id, report, f"⚡ Hydra: {ip}")
-    except:
-        bot.send_message(message.chat.id, "❌ Error. Usa: `IP Servicio Usuario`")
-
-@bot.message_handler(commands=['fuzz'])
-def cmd_fuzz(message):
-    msg = bot.send_message(message.chat.id, "🔍 **URL con FUZZ:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_fuzz, m))
-
-def do_fuzz(message):
-    url = message.text.strip()
-    path = os.path.join(BASE_DIR, "fuzz_res.txt")
-    subprocess.run(f"ffuf -u {url} -w {obtener_wordlist_maestra()} -mc 200,403 -o {path}", shell=True)
-    enviar_reporte(message.chat.id, path, "🔍 FFUF")
-
-@bot.message_handler(commands=['crawl'])
-def cmd_crawl(message):
-    msg = bot.send_message(message.chat.id, "🕸️ **URL para Crawling:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_crawl, m))
-
-def do_crawl(message):
-    target = message.text.strip()
-    path = os.path.join(BASE_DIR, "crawl_res.txt")
-    subprocess.run(f"katana -u {target} -silent -o {path}", shell=True)
-    enviar_reporte(message.chat.id, path, "🕸️ Katana")
+    enviar_doc(message.chat.id, path, f"📂 Directorios en `{url}`")
 
 @bot.message_handler(commands=['subs'])
 def cmd_subs(message):
-    msg = bot.send_message(message.chat.id, "📡 **Dominio:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_subs, m))
+    msg = bot.send_message(message.chat.id, "📡 **Dominio para buscar subdominios (ej: google.com):**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_hilo(do_subs, m))
 
 def do_subs(message):
-    target = message.text.strip()
-    path = os.path.join(BASE_DIR, "subs_res.txt")
-    subprocess.run(f"subfinder -d {target} -silent -o {path}", shell=True)
-    enviar_reporte(message.chat.id, path, "📡 Subdominios")
+    dom = message.text.strip()
+    path = os.path.join(BASE_DIR, f"subs_{int(time.time())}.txt")
+    bot.send_message(message.chat.id, f"📡 Mapeando subdominios de `{dom}`...")
+    subprocess.run(f"subfinder -d {dom} -o {path} -silent", shell=True)
+    enviar_doc(message.chat.id, path, f"📡 Subdominios de `{dom}`")
+
+@bot.message_handler(commands=['apk'])
+def cmd_apk(message):
+    msg = bot.send_message(message.chat.id, "📱 **Sube el archivo APK para analizar:**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_hilo(do_apk, m))
+
+def do_apk(message):
+    if not message.document:
+        bot.send_message(message.chat.id, "❌ No enviaste un archivo.")
+        return
+    info = bot.get_file(message.document.file_id)
+    raw = bot.download_file(info.file_path)
+    tmp = os.path.join(BASE_DIR, "analisis.apk")
+    res = os.path.join(BASE_DIR, f"apk_{int(time.time())}.txt")
+    with open(tmp, 'wb') as f: f.write(raw)
+    bot.send_message(message.chat.id, "📱 Extrayendo secretos e IPs del binario...")
+    regex = r'http[s]?://[^\s\'"]+|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|AIza[0-9A-Za-z-_]{35}'
+    subprocess.run(f"strings '{tmp}' | grep -E '{regex}' > '{res}'", shell=True)
+    if os.path.exists(tmp): os.remove(tmp)
+    enviar_doc(message.chat.id, res, "📱 Secretos del APK")
 
 @bot.message_handler(commands=['auditar'])
 def cmd_audit(message):
-    msg = bot.send_message(message.chat.id, "🔓 **URL para Nuclei:**")
-    bot.register_next_step_handler(msg, lambda m: ejecutar_en_hilo(do_audit, m))
+    msg = bot.send_message(message.chat.id, "🛡️ **URL para auditoría de vulnerabilidades (Nuclei):**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_hilo(do_audit, m))
 
 def do_audit(message):
-    target = message.text.strip()
-    path = os.path.join(BASE_DIR, "audit_res.txt")
-    subprocess.run(f"nuclei -u {target} -silent -o {path}", shell=True)
-    enviar_reporte(message.chat.id, path, "📄 Vulnerabilidades")
+    url = message.text.strip()
+    path = os.path.join(BASE_DIR, f"audit_{int(time.time())}.txt")
+    bot.send_message(message.chat.id, "🛡️ Ejecutando Nuclei (CVE, Misconfigurations)...")
+    subprocess.run(f"nuclei -u {url} -o {path} -silent", shell=True)
+    enviar_doc(message.chat.id, path, f"🛡️ Auditoría de `{url}`")
 
-@bot.message_handler(commands=['help', 'start'])
+@bot.message_handler(commands=['fuerza'])
+def cmd_fuerza(message):
+    bot.send_message(message.chat.id, "⚡ **Formato: `IP Servicio Usuario`**\nEjemplo: `1.1.1.1 ssh root`")
+    bot.register_next_step_handler(message, lambda m: ejecutar_hilo(do_fuerza, m))
+
+def do_fuerza(message):
+    try:
+        parts = message.text.split()
+        target, service, user = parts[0], parts[1], parts[2]
+        path = os.path.join(BASE_DIR, f"hydra_{int(time.time())}.txt")
+        wordlist = preparar_wordlist()
+        bot.send_message(message.chat.id, f"⚡ Atacando {service} en {target}...")
+        subprocess.run(f"hydra -l {user} -P {wordlist} {target} {service} -o {path}", shell=True)
+        enviar_doc(message.chat.id, path, f"⚡ Fuerza bruta Hydra en `{target}`")
+    except:
+        bot.send_message(message.chat.id, "❌ Error en el formato. Usa: `IP Servicio Usuario`")
+
+@bot.message_handler(commands=['help'])
 def cmd_help(message):
-    if str(message.chat.id) == YOUR_CHAT_ID:
-        txt = (
-            "🚀 **Bugtin Bot v17.5 Hunter**\n\n"
-            "📂 `/dir` - PHP/HTML/Directorios\n"
-            "💳 `/buscar_cc` - CC en Web\n"
-            "🗄️ `/buscar_db` - SQL/Backups\n"
-            "📱 `/apk` - Analizar APK\n"
-            "⚡ `/fuerza` - Brute Force\n"
-            "🔍 `/fuzz` - Fuzzing\n"
-            "🕸️ `/crawl` - Crawling\n"
-            "📡 `/subs` - Subdominios\n"
-            "🔓 `/auditar` - Vulnerabilidades"
-        )
-        bot.send_message(message.chat.id, txt, parse_mode="Markdown")
+    help_text = (
+        "💡 **Manual de Comandos Bugtin**\n\n"
+        "📂 `/dir` - Busca archivos y carpetas ocultas.\n"
+        "📡 `/subs` - Encuentra subdominios.\n"
+        "📱 `/apk` - Analiza secretos en APKs.\n"
+        "🛡️ `/auditar` - Escaneo profundo de fallos CVE.\n"
+        "⚡ `/fuerza` - Ataque de diccionario (Hydra).\n"
+        "🗄️ `/buscar_db` - Busca bases de datos y backups."
+    )
+    bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
 
 if __name__ == "__main__":
-    print("🚀 Bugtin Bot v17.5 Pro Hunter Online - Correcciones Aplicadas")
+    print("🚀 Bugtin Bot by owen")
     bot.polling(none_stop=True)
