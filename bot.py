@@ -83,7 +83,7 @@ def cmd_start(message):
         types.InlineKeyboardButton("📂 Directorios", callback_data="help_dir"),
         types.InlineKeyboardButton("📡 Subdominios", callback_data="help_subs"),
         types.InlineKeyboardButton("🛡️ Auditoría", callback_data="help_audit"),
-        types.InlineKeyboardButton("🗄️ DB Hunter", callback_data="help_db")
+        types.InlineKeyboardButton("🔗 JS Hunt", callback_data="help_js")
     )
     
     bot.send_message(message.chat.id, "🤖 **Bugtin Bot v23.0**\nCentro de mando activo.", parse_mode="Markdown", reply_markup=markup)
@@ -125,7 +125,6 @@ def do_subs(message):
         
         bot.send_message(message.chat.id, f"⚡ Validando {len(subdominios)} subdominios en paralelo...")
         
-        # Validación concurrente para máxima velocidad en Termux
         with ThreadPoolExecutor(max_workers=20) as executor:
             resultados = list(executor.map(verificar_url, subdominios))
         
@@ -137,6 +136,21 @@ def do_subs(message):
         enviar_doc(message.chat.id, path_final, f"📡 Subdominios Validados: `{dom}`")
     else:
         bot.send_message(message.chat.id, "❌ Error: Subfinder no produjo resultados.")
+
+@bot.message_handler(commands=['js_hunt'])
+def cmd_js(message):
+    msg = bot.send_message(message.chat.id, "🕵️ **URL para extraer endpoints de JS:**")
+    bot.register_next_step_handler(msg, lambda m: ejecutar_hilo(do_js_hunt, m))
+
+def do_js_hunt(message):
+    url = message.text.strip()
+    res = os.path.join(BASE_DIR, f"js_{int(time.time())}.txt")
+    bot.send_message(message.chat.id, "🔍 Analizando código fuente y scripts...")
+    # Regex para capturar URLs, IPs y llaves de Firebase/APIs
+    regex = r'https?://[^\s\"\'\>]+|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|AIza[0-9A-Za-z-_]{35}'
+    cmd = f"curl -s -L -k {url} | grep -oE '{regex}' | sort -u > {res}"
+    subprocess.run(cmd, shell=True)
+    enviar_doc(message.chat.id, res, f"🔗 Enlaces y Secretos en `{url}`")
 
 @bot.message_handler(commands=['fuerza'])
 def cmd_fuerza(message):
@@ -189,6 +203,7 @@ def cmd_help(message):
         "💡 **Manual Bugtin Bot**\n\n"
         "📂 `/dir` - Archivos (.php, .env, .sql...)\n"
         "📡 `/subs` - Subdominios + IP + Status ✅/❌\n"
+        "🕵️ `/js_hunt` - Enlaces y secretos en JS\n"
         "🛡️ `/auditar` - Fallos Reales (Nuclei Anti-Ban)\n"
         "⚡ `/fuerza` - Hydra usando maestra.txt\n"
         "🗄️ `/buscar_db` - Caza de Backups y DBs\n"
